@@ -1,4 +1,41 @@
+import * as offlineStorage from './offlineStorage.js'
+
 const API_BASE = '/api'
+
+// Connection state
+let isOnline = navigator.onLine
+let onlineListeners = new Set()
+let syncInProgress = false
+
+// Initialize online/offline listeners
+window.addEventListener('online', () => {
+  isOnline = true
+  notifyOnlineStatus(true)
+  attemptSync()
+})
+
+window.addEventListener('offline', () => {
+  isOnline = false
+  notifyOnlineStatus(false)
+})
+
+function notifyOnlineStatus(online) {
+  onlineListeners.forEach(listener => listener(online))
+}
+
+function addOnlineListener(listener) {
+  onlineListeners.add(listener)
+  // Immediately notify current status
+  listener(isOnline)
+}
+
+function removeOnlineListener(listener) {
+  onlineListeners.delete(listener)
+}
+
+function getOnlineStatus() {
+  return isOnline
+}
 
 function getToken() {
   return localStorage.getItem('token')
@@ -41,6 +78,124 @@ async function request(endpoint, options = {}) {
   }
 
   return data
+}
+
+// Try a request, return null if offline/failed
+async function tryRequest(endpoint, options = {}) {
+  if (!isOnline) {
+    return null
+  }
+  try {
+    return await request(endpoint, options)
+  } catch (err) {
+    // Network error - likely offline
+    if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
+      isOnline = false
+      notifyOnlineStatus(false)
+      return null
+    }
+    throw err
+  }
+}
+
+// Sync pending operations with the server
+async function attemptSync() {
+  if (!isOnline || syncInProgress || !getToken()) {
+    return { success: false, synced: 0 }
+  }
+
+  syncInProgress = true
+  let syncedCount = 0
+
+  try {
+    const queue = await offlineStorage.getSyncQueue()
+    
+    // Map to track local ID -> server ID mappings
+    const idMappings = new Map()
+    
+    for (const operation of queue) {
+      try {
+        let result
+        
+        // Resolve local IDs to server IDs if needed
+        let targetId = operation.timerId
+        if (offlineStorage.isLocalId(targetId) && idMappings.has(targetId)) {
+          targetId = idMappings.get(targetId)
+        }
+        
+        switch (operation.type) {
+          case 'create':
+            result = await request('/timers', {
+              method: 'POST',
+              body: JSON.stringify(operation.data)
+            })
+            // Store mapping from local ID to server ID
+            if (operation.localId && result?.id) {
+              idMappings.set(operation.localId, result.id)
+              await offlineStorage.updateTimerId(operation.localId, result.id, result)
+            }
+            break
+
+          case 'update':
+            if (!offlineStorage.isLocalId(targetId)) {
+              result = await request(`/timers/${targetId}`, {
+                method: 'PATCH',
+                body: JSON.stringify(operation.data)
+              })
+            }
+            break
+
+          case 'stop':
+            if (!offlineStorage.isLocalId(targetId)) {
+              result = await request(`/timers/${targetId}/stop`, {
+                method: 'POST'
+              })
+            }
+            break
+
+          case 'delete':
+            if (!offlineStorage.isLocalId(targetId)) {
+              await request(`/timers/${targetId}`, {
+                method: 'DELETE'
+              })
+            }
+            break
+        }
+        
+        // Remove from queue after successful sync
+        await offlineStorage.removeSyncQueueItem(operation.id)
+        syncedCount++
+      } catch (err) {
+        console.error('Sync operation failed:', operation, err)
+        // If it's a 404, the item was deleted on server - remove from queue
+        if (err.message.includes('not found')) {
+          await offlineStorage.removeSyncQueueItem(operation.id)
+        }
+        // Continue with other operations
+      }
+    }
+
+    // Refresh timers from server after sync
+    if (syncedCount > 0) {
+      try {
+        const serverTimers = await request('/timers')
+        await offlineStorage.saveTimers(serverTimers)
+      } catch (err) {
+        console.error('Failed to refresh timers after sync:', err)
+      }
+    }
+
+    return { success: true, synced: syncedCount }
+  } catch (err) {
+    console.error('Sync failed:', err)
+    return { success: false, synced: syncedCount }
+  } finally {
+    syncInProgress = false
+  }
+}
+
+async function getPendingSyncCount() {
+  return await offlineStorage.getPendingSyncCount()
 }
 
 // WebSocket connection
@@ -139,6 +294,13 @@ export const api = {
   addWsListener,
   removeWsListener,
 
+  // Online status methods
+  addOnlineListener,
+  removeOnlineListener,
+  getOnlineStatus,
+  attemptSync,
+  getPendingSyncCount,
+
   login(email, password) {
     return request('/auth/login', {
       method: 'POST',
@@ -164,37 +326,144 @@ export const api = {
     })
   },
 
-  getTimers() {
-    return request('/timers')
+  // Timer methods with offline support
+  async getTimers() {
+    const result = await tryRequest('/timers')
+    
+    if (result !== null) {
+      // Online - save to local storage and return
+      await offlineStorage.saveTimers(result)
+      return result
+    }
+    
+    // Offline - return from local storage
+    return await offlineStorage.getAllTimers()
   },
 
-  getTags() {
-    return request('/timers/tags')
+  async getTags() {
+    const result = await tryRequest('/timers/tags')
+    
+    if (result !== null) {
+      return result
+    }
+    
+    // Offline - get tags from local timers
+    return await offlineStorage.getLocalTags()
   },
 
-  createTimer(data = {}) {
-    return request('/timers', {
+  async createTimer(data = {}) {
+    // Add start_time if not provided
+    const timerData = {
+      ...data,
+      start_time: data.start_time || new Date().toISOString()
+    }
+
+    const result = await tryRequest('/timers', {
       method: 'POST',
-      body: JSON.stringify(data)
+      body: JSON.stringify(timerData)
     })
+
+    if (result !== null) {
+      // Online - save to local storage
+      await offlineStorage.saveTimer(result)
+      return result
+    }
+
+    // Offline - create locally with temporary ID
+    const localId = offlineStorage.generateLocalId()
+    const localTimer = {
+      id: localId,
+      ...timerData,
+      end_time: timerData.end_time || null
+    }
+
+    await offlineStorage.saveTimer(localTimer)
+    await offlineStorage.addToSyncQueue({
+      type: 'create',
+      localId: localId,
+      data: timerData
+    })
+
+    return localTimer
   },
 
-  updateTimer(id, data) {
-    return request(`/timers/${id}`, {
+  async updateTimer(id, data) {
+    // Always update local storage first
+    const existingTimer = await offlineStorage.getTimer(id)
+    if (existingTimer) {
+      const updatedTimer = { ...existingTimer, ...data }
+      await offlineStorage.saveTimer(updatedTimer)
+    }
+
+    const result = await tryRequest(`/timers/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data)
     })
+
+    if (result !== null) {
+      // Online - save updated timer
+      await offlineStorage.saveTimer(result)
+      return result
+    }
+
+    // Offline - queue the update
+    await offlineStorage.addToSyncQueue({
+      type: 'update',
+      timerId: id,
+      data: data
+    })
+
+    // Return the locally updated timer
+    return await offlineStorage.getTimer(id)
   },
 
-  stopTimer(id) {
-    return request(`/timers/${id}/stop`, {
+  async stopTimer(id) {
+    const endTime = new Date().toISOString()
+    
+    // Always update local storage first
+    const existingTimer = await offlineStorage.getTimer(id)
+    if (existingTimer) {
+      existingTimer.end_time = endTime
+      await offlineStorage.saveTimer(existingTimer)
+    }
+
+    const result = await tryRequest(`/timers/${id}/stop`, {
       method: 'POST'
     })
+
+    if (result !== null) {
+      await offlineStorage.saveTimer(result)
+      return result
+    }
+
+    // Offline - queue the stop
+    await offlineStorage.addToSyncQueue({
+      type: 'stop',
+      timerId: id,
+      data: { end_time: endTime }
+    })
+
+    return existingTimer
   },
 
-  deleteTimer(id) {
-    return request(`/timers/${id}`, {
+  async deleteTimer(id) {
+    // Delete locally first
+    await offlineStorage.deleteTimer(id)
+
+    const result = await tryRequest(`/timers/${id}`, {
       method: 'DELETE'
     })
+
+    if (result === null && isOnline === false) {
+      // Offline - queue the delete (only for server IDs)
+      if (!offlineStorage.isLocalId(id)) {
+        await offlineStorage.addToSyncQueue({
+          type: 'delete',
+          timerId: id
+        })
+      }
+    }
+
+    return null
   }
 }

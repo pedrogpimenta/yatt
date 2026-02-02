@@ -14,6 +14,12 @@ const newTag = ref('')
 const tags = ref([])
 const viewMode = ref('calendar') // 'list' or 'calendar'
 const selectedTimer = ref(null)
+const filterTag = ref('') // '' means all tags
+
+// Offline status
+const isOnline = ref(api.getOnlineStatus())
+const pendingSyncCount = ref(0)
+const syncing = ref(false)
 
 let tickInterval = null
 
@@ -89,6 +95,7 @@ async function saveEditElapsed() {
     await api.updateTimer(runningTimer.value.id, { start_time: newStartTime })
     await fetchTimers()
     isEditingElapsed.value = false
+    await updatePendingSyncCount()
   } catch (err) {
     error.value = err.message
   }
@@ -97,6 +104,38 @@ async function saveEditElapsed() {
 function onWsMessage(data) {
   if (data.type === 'timer') {
     fetchTimers()
+  }
+}
+
+function onOnlineStatusChange(online) {
+  isOnline.value = online
+  if (online) {
+    // Trigger sync when back online
+    syncPendingChanges()
+  }
+}
+
+async function updatePendingSyncCount() {
+  pendingSyncCount.value = await api.getPendingSyncCount()
+}
+
+async function syncPendingChanges() {
+  if (syncing.value || !isOnline.value) return
+  
+  syncing.value = true
+  error.value = ''
+  
+  try {
+    const result = await api.attemptSync()
+    if (result.synced > 0) {
+      await fetchTimers()
+      await fetchTags()
+    }
+  } catch (err) {
+    error.value = 'Sync failed: ' + err.message
+  } finally {
+    syncing.value = false
+    await updatePendingSyncCount()
   }
 }
 
@@ -144,6 +183,65 @@ const weekTotal = computed(() => {
   return total
 })
 
+const filteredTimers = computed(() => {
+  if (!filterTag.value) {
+    return timers.value
+  }
+  return timers.value.filter(t => t.tag === filterTag.value)
+})
+
+const filteredTotal = computed(() => {
+  const elapsed = currentElapsed.value
+  
+  let total = 0
+  for (const timer of filteredTimers.value) {
+    const start = new Date(timer.start_time).getTime()
+    if (timer.end_time) {
+      total += new Date(timer.end_time).getTime() - start
+    } else {
+      total += elapsed
+    }
+  }
+  return total
+})
+
+const timersByDay = computed(() => {
+  const groups = []
+  let currentDateStr = null
+  
+  for (const timer of filteredTimers.value) {
+    const date = new Date(timer.start_time)
+    const dateStr = date.toDateString()
+    
+    if (dateStr !== currentDateStr) {
+      currentDateStr = dateStr
+      groups.push({
+        date: date,
+        label: formatDateLabel(date),
+        timers: [timer]
+      })
+    } else {
+      groups[groups.length - 1].timers.push(timer)
+    }
+  }
+  
+  return groups
+})
+
+function formatDateLabel(date) {
+  const today = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  
+  if (date.toDateString() === today.toDateString()) {
+    return 'Today'
+  }
+  if (date.toDateString() === yesterday.toDateString()) {
+    return 'Yesterday'
+  }
+  return date.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
+}
+
 function formatDuration(ms) {
   return formatHHmmss(ms)
 }
@@ -185,6 +283,7 @@ async function toggleTimer() {
       }
     }
     await fetchTimers()
+    await updatePendingSyncCount()
   } catch (err) {
     error.value = err.message
   }
@@ -200,6 +299,7 @@ async function updateRunningTag() {
       fetchTags()
     }
     await fetchTimers()
+    await updatePendingSyncCount()
   } catch (err) {
     error.value = err.message
   }
@@ -211,6 +311,7 @@ async function handleUpdate(id, data) {
     await api.updateTimer(id, data)
     await fetchTimers()
     selectedTimer.value = null
+    await updatePendingSyncCount()
   } catch (err) {
     error.value = err.message
   }
@@ -222,6 +323,7 @@ async function handleDelete(id) {
     await api.deleteTimer(id)
     await fetchTimers()
     selectedTimer.value = null
+    await updatePendingSyncCount()
   } catch (err) {
     error.value = err.message
   }
@@ -238,11 +340,13 @@ function closeSelectedTimer() {
 onMounted(() => {
   fetchTimers()
   fetchTags()
+  updatePendingSyncCount()
   tickInterval = setInterval(() => {
     updateCurrentElapsed()
   }, 1000)
   
   api.addWsListener(onWsMessage)
+  api.addOnlineListener(onOnlineStatusChange)
 })
 
 onUnmounted(() => {
@@ -250,6 +354,7 @@ onUnmounted(() => {
     clearInterval(tickInterval)
   }
   api.removeWsListener(onWsMessage)
+  api.removeOnlineListener(onOnlineStatusChange)
 })
 </script>
 
@@ -259,12 +364,43 @@ onUnmounted(() => {
     <aside class="sidebar">
       <div class="sidebar-header">
         <h1 class="logo">YATT</h1>
-        <button @click="emit('openSettings')" class="settings-btn" title="Settings">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-          </svg>
-        </button>
+        <div class="header-actions">
+          <!-- Offline/Sync indicator -->
+          <div class="sync-status" :class="{ offline: !isOnline, syncing: syncing }">
+            <button 
+              v-if="pendingSyncCount > 0 && isOnline" 
+              @click="syncPendingChanges" 
+              class="sync-btn"
+              :disabled="syncing"
+              :title="syncing ? 'Syncing...' : `Sync ${pendingSyncCount} pending changes`"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ spinning: syncing }">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <polyline points="1 20 1 14 7 14"></polyline>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+              </svg>
+              <span class="sync-count">{{ pendingSyncCount }}</span>
+            </button>
+            <div v-else-if="!isOnline" class="offline-indicator" title="Offline - changes will sync when online">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="1" y1="1" x2="23" y2="23"></line>
+                <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"></path>
+                <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"></path>
+                <path d="M10.71 5.05A16 16 0 0 1 22.58 9"></path>
+                <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"></path>
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                <line x1="12" y1="20" x2="12.01" y2="20"></line>
+              </svg>
+              <span v-if="pendingSyncCount > 0" class="pending-badge">{{ pendingSyncCount }}</span>
+            </div>
+          </div>
+          <button @click="emit('openSettings')" class="settings-btn" title="Settings">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div class="sidebar-content">
@@ -381,16 +517,39 @@ onUnmounted(() => {
 
       <!-- List View -->
       <div class="content-body list-view" v-else>
+        <div class="list-header">
+          <div class="filter-section">
+            <label for="tag-filter">Filter by tag:</label>
+            <select id="tag-filter" v-model="filterTag" class="tag-filter-select">
+              <option value="">All tags</option>
+              <option v-for="tag in tags" :key="tag" :value="tag">{{ tag }}</option>
+            </select>
+            <button v-if="filterTag" @click="filterTag = ''" class="clear-filter-btn" title="Clear filter">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+              Clear
+            </button>
+          </div>
+          <div class="filtered-total">
+            <span class="filtered-total-value">{{ formatDuration(filteredTotal) }}</span>
+            <span class="filtered-total-label">Total{{ filterTag ? ` (${filterTag})` : '' }}</span>
+          </div>
+        </div>
         <p v-if="loading" class="loading">Loading...</p>
-        <p v-else-if="timers.length === 0" class="empty">No timers yet</p>
+        <p v-else-if="filteredTimers.length === 0" class="empty">{{ filterTag ? 'No timers with this tag' : 'No timers yet' }}</p>
         <div class="timer-list">
-          <TimerItem 
-            v-for="timer in timers" 
-            :key="timer.id" 
-            :timer="timer"
-            @update="handleUpdate"
-            @delete="handleDelete"
-          />
+          <template v-for="group in timersByDay" :key="group.date.toISOString()">
+            <div class="day-separator">{{ group.label }}</div>
+            <TimerItem 
+              v-for="timer in group.timers" 
+              :key="timer.id" 
+              :timer="timer"
+              @update="handleUpdate"
+              @delete="handleDelete"
+            />
+          </template>
         </div>
       </div>
     </main>
@@ -441,6 +600,83 @@ onUnmounted(() => {
   font-size: 1.5rem;
   font-weight: 700;
   color: var(--accent-color);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sync-status {
+  display: flex;
+  align-items: center;
+}
+
+.sync-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--accent-color);
+  border: none;
+  color: #fff;
+  padding: 0.375rem 0.625rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.sync-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.sync-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.sync-btn svg.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.sync-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.offline-indicator {
+  display: flex;
+  align-items: center;
+  position: relative;
+  color: var(--text-muted);
+  padding: 0.375rem;
+}
+
+.offline-indicator svg {
+  color: #f59e0b;
+}
+
+.pending-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 600;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .settings-btn {
@@ -714,8 +950,99 @@ onUnmounted(() => {
   padding: 1.5rem;
 }
 
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  max-width: 800px;
+}
+
+.filter-section {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filter-section label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.tag-filter-select {
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  min-width: 150px;
+}
+
+.tag-filter-select:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.clear-filter-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.clear-filter-btn:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border-light);
+  color: var(--text-primary);
+}
+
+.filtered-total {
+  text-align: right;
+}
+
+.filtered-total-value {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.filtered-total-label {
+  display: block;
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 .timer-list {
   max-width: 800px;
+}
+
+.day-separator {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.5rem 0;
+  margin-top: 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 0.75rem;
+}
+
+.day-separator:first-child {
+  margin-top: 0;
 }
 
 .loading, .empty {
@@ -799,6 +1126,16 @@ onUnmounted(() => {
   .main-content {
     height: auto;
     min-height: 50vh;
+  }
+  
+  .list-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  
+  .filtered-total {
+    text-align: left;
   }
 }
 </style>
