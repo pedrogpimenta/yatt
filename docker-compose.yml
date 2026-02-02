@@ -1,0 +1,23 @@
+services:
+  api:
+    build: ./api
+    ports:
+      - "3000:3000"
+    volumes:
+      - api-data:/app/data
+    environment:
+      - JWT_SECRET=${JWT_SECRET:-please-change-this-secret}
+      - PORT=3000
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    environment:
+      - NODE_ENV=development
+
+volumes:
+  api-data:

@@ -1,0 +1,322 @@
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls as QQC2
+import org.kde.plasma.components as PlasmaComponents
+import org.kde.plasma.extras as PlasmaExtras
+import org.kde.kirigami as Kirigami
+
+PlasmaExtras.Representation {
+    id: fullRoot
+
+    property bool editingElapsed: false
+    property string editElapsedValue: ""
+    property real editStartedAt: 0
+    property bool editingStartTime: false
+    property string editStartDate: ""
+    property string editStartTime: ""
+
+    Layout.minimumWidth: Kirigami.Units.gridUnit * 14
+    Layout.minimumHeight: Kirigami.Units.gridUnit * 10
+    Layout.preferredWidth: Kirigami.Units.gridUnit * 16
+    Layout.preferredHeight: Kirigami.Units.gridUnit * 14
+
+    function formatStartTime(isoString) {
+        var date = new Date(isoString)
+        return "Started " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+
+    function toDateString(isoString) {
+        var date = new Date(isoString)
+        var year = date.getFullYear()
+        var month = String(date.getMonth() + 1).padStart(2, '0')
+        var day = String(date.getDate()).padStart(2, '0')
+        return year + "-" + month + "-" + day
+    }
+
+    function toTimeString(isoString) {
+        var date = new Date(isoString)
+        var hours = String(date.getHours()).padStart(2, '0')
+        var minutes = String(date.getMinutes()).padStart(2, '0')
+        return hours + ":" + minutes
+    }
+
+    function startEditElapsed() {
+        editElapsedValue = root.formatHHmmss(root.currentElapsed)
+        editStartedAt = Date.now()
+        editingElapsed = true
+    }
+
+    function cancelEditElapsed() {
+        editingElapsed = false
+    }
+
+    function saveEditElapsed() {
+        var timeSinceEditStarted = Date.now() - editStartedAt
+        if (root.updateElapsedTime(editElapsedValue, timeSinceEditStarted)) {
+            editingElapsed = false
+        }
+    }
+
+    function startEdit() {
+        if (root.currentTimer) {
+            editStartDate = toDateString(root.currentTimer.start_time)
+            editStartTime = toTimeString(root.currentTimer.start_time)
+            editingStartTime = true
+        }
+    }
+
+    function cancelEdit() {
+        editingStartTime = false
+    }
+
+    function saveEdit() {
+        var newStartTime = new Date(editStartDate + "T" + editStartTime).toISOString()
+        root.updateCurrentTimer({ start_time: newStartTime })
+        editingStartTime = false
+    }
+
+    header: PlasmaExtras.PlasmoidHeading {
+        RowLayout {
+            anchors.fill: parent
+            
+            PlasmaExtras.Heading {
+                Layout.fillWidth: true
+                level: 1
+                text: "YATT"
+            }
+
+            PlasmaComponents.ToolButton {
+                icon.name: "view-refresh"
+                onClicked: root.fetchTimers()
+                PlasmaComponents.ToolTip { text: "Refresh" }
+            }
+
+            PlasmaComponents.ToolButton {
+                icon.name: "configure"
+                onClicked: Plasmoid.internalAction("configure").trigger()
+                PlasmaComponents.ToolTip { text: "Configure" }
+            }
+        }
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: Kirigami.Units.smallSpacing
+        spacing: Kirigami.Units.largeSpacing
+
+        // Current timer display
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignHCenter
+            spacing: Kirigami.Units.smallSpacing
+
+            // Elapsed time display (clickable to edit)
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                visible: !fullRoot.editingElapsed
+                text: root.isRunning ? root.formatHHmmss(root.currentElapsed) : "00:00:00"
+                font.pointSize: 24
+                font.bold: true
+                color: root.isRunning ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.disabledTextColor
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: root.isRunning ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    enabled: root.isRunning
+                    onClicked: fullRoot.startEditElapsed()
+                }
+            }
+
+            // Edit elapsed time form
+            ColumnLayout {
+                Layout.fillWidth: true
+                visible: fullRoot.editingElapsed
+                spacing: Kirigami.Units.smallSpacing
+
+                QQC2.TextField {
+                    id: elapsedField
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 6
+                    text: fullRoot.editElapsedValue
+                    onTextChanged: fullRoot.editElapsedValue = text
+                    inputMask: "99:99:99"
+                    placeholderText: "HH:MM:SS"
+                    font.pointSize: 18
+                    horizontalAlignment: Text.AlignHCenter
+                    onAccepted: fullRoot.saveEditElapsed()
+                }
+
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: Kirigami.Units.smallSpacing
+
+                    PlasmaComponents.Button {
+                        text: "Cancel"
+                        onClicked: fullRoot.cancelEditElapsed()
+                    }
+
+                    PlasmaComponents.Button {
+                        text: "Save"
+                        onClicked: fullRoot.saveEditElapsed()
+                    }
+                }
+            }
+
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                visible: root.isRunning && root.currentTimer && root.currentTimer.tag && !fullRoot.editingElapsed
+                text: root.currentTimer ? (root.currentTimer.tag || "") : ""
+                color: Kirigami.Theme.textColor
+                opacity: 0.7
+            }
+
+            // Start time display (clickable to edit)
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                visible: root.isRunning && root.currentTimer && !fullRoot.editingStartTime && !fullRoot.editingElapsed
+                text: root.currentTimer ? formatStartTime(root.currentTimer.start_time) : ""
+                color: Kirigami.Theme.linkColor
+                font.underline: true
+                opacity: 0.8
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: fullRoot.startEdit()
+                }
+            }
+
+            // Edit start time form
+            ColumnLayout {
+                Layout.fillWidth: true
+                visible: fullRoot.editingStartTime
+                spacing: Kirigami.Units.smallSpacing
+
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: Kirigami.Units.smallSpacing
+
+                    QQC2.TextField {
+                        id: dateField
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 7
+                        text: fullRoot.editStartDate
+                        onTextChanged: fullRoot.editStartDate = text
+                        inputMask: "9999-99-99"
+                        placeholderText: "YYYY-MM-DD"
+                    }
+
+                    QQC2.TextField {
+                        id: timeField
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                        text: fullRoot.editStartTime
+                        onTextChanged: fullRoot.editStartTime = text
+                        inputMask: "99:99"
+                        placeholderText: "HH:MM"
+                    }
+                }
+
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: Kirigami.Units.smallSpacing
+
+                    PlasmaComponents.Button {
+                        text: "Cancel"
+                        onClicked: fullRoot.cancelEdit()
+                    }
+
+                    PlasmaComponents.Button {
+                        text: "Save"
+                        onClicked: fullRoot.saveEdit()
+                    }
+                }
+            }
+        }
+
+        // Start/Stop button
+        PlasmaComponents.Button {
+            Layout.fillWidth: true
+            Layout.preferredHeight: Kirigami.Units.gridUnit * 2.5
+            text: root.isRunning ? "Stop" : "Start"
+            icon.name: root.isRunning ? "media-playback-stop" : "media-playback-start"
+            onClicked: root.toggleTimer()
+        }
+
+        // Stats
+        GridLayout {
+            Layout.fillWidth: true
+            columns: 2
+            rowSpacing: Kirigami.Units.smallSpacing
+            columnSpacing: Kirigami.Units.largeSpacing
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 3
+                color: Kirigami.Theme.backgroundColor
+                border.color: Kirigami.Theme.disabledTextColor
+                border.width: 1
+                radius: Kirigami.Units.smallSpacing
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 2
+
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "TODAY"
+                        font.pointSize: 8
+                        font.bold: true
+                        color: Kirigami.Theme.disabledTextColor
+                    }
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: root.formatDuration(root.todayTotal)
+                        font.pointSize: 12
+                        color: Kirigami.Theme.textColor
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 3
+                color: Kirigami.Theme.backgroundColor
+                border.color: Kirigami.Theme.disabledTextColor
+                border.width: 1
+                radius: Kirigami.Units.smallSpacing
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 2
+
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "THIS WEEK"
+                        font.pointSize: 8
+                        font.bold: true
+                        color: Kirigami.Theme.disabledTextColor
+                    }
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: root.formatDuration(root.weekTotal)
+                        font.pointSize: 12
+                        color: Kirigami.Theme.textColor
+                    }
+                }
+            }
+        }
+
+        // No token warning
+        PlasmaExtras.Heading {
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignHCenter
+            visible: !root.token
+            level: 4
+            text: "Configure API URL and token in settings"
+            color: Kirigami.Theme.neutralTextColor
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+        }
+
+        Item { Layout.fillHeight: true }
+    }
+}
