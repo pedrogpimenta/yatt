@@ -3,12 +3,16 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { api } from '../api.js'
 import TimerItem from './TimerItem.vue'
 import WeeklyCalendar from './WeeklyCalendar.vue'
+import TagInput from './TagInput.vue'
+
+const emit = defineEmits(['openSettings'])
 
 const timers = ref([])
 const loading = ref(true)
 const error = ref('')
 const newTag = ref('')
-const viewMode = ref('list') // 'list' or 'calendar'
+const tags = ref([])
+const viewMode = ref('calendar') // 'list' or 'calendar'
 const selectedTimer = ref(null)
 
 let tickInterval = null
@@ -44,13 +48,11 @@ function formatHHmmss(ms) {
 function parseHHmmss(str) {
   const parts = str.split(':')
   if (parts.length === 2) {
-    // HH:mm format
     const hours = parseInt(parts[0], 10)
     const minutes = parseInt(parts[1], 10)
     if (isNaN(hours) || isNaN(minutes)) return null
     return (hours * 3600 + minutes * 60) * 1000
   } else if (parts.length === 3) {
-    // HH:mm:ss format
     const hours = parseInt(parts[0], 10)
     const minutes = parseInt(parts[1], 10)
     const seconds = parseInt(parts[2], 10)
@@ -78,7 +80,6 @@ async function saveEditElapsed() {
     return
   }
   
-  // Add time elapsed since we started editing
   const timeSinceEditStarted = Date.now() - editStartedAt.value
   const totalElapsedMs = enteredMs + timeSinceEditStarted
   
@@ -93,7 +94,6 @@ async function saveEditElapsed() {
   }
 }
 
-// WebSocket listener for real-time updates
 function onWsMessage(data) {
   if (data.type === 'timer') {
     fetchTimers()
@@ -101,7 +101,6 @@ function onWsMessage(data) {
 }
 
 const todayTotal = computed(() => {
-  // Reference currentElapsed to trigger reactivity on tick
   const elapsed = currentElapsed.value
   
   const today = new Date()
@@ -114,7 +113,6 @@ const todayTotal = computed(() => {
       if (timer.end_time) {
         total += new Date(timer.end_time).getTime() - start.getTime()
       } else {
-        // Running timer - use currentElapsed for real-time updates
         total += elapsed
       }
     }
@@ -123,7 +121,6 @@ const todayTotal = computed(() => {
 })
 
 const weekTotal = computed(() => {
-  // Reference currentElapsed to trigger reactivity on tick
   const elapsed = currentElapsed.value
   
   const now = new Date()
@@ -140,7 +137,6 @@ const weekTotal = computed(() => {
       if (timer.end_time) {
         total += new Date(timer.end_time).getTime() - start.getTime()
       } else {
-        // Running timer - use currentElapsed for real-time updates
         total += elapsed
       }
     }
@@ -156,10 +152,22 @@ async function fetchTimers() {
   try {
     timers.value = await api.getTimers()
     updateCurrentElapsed()
+    // Sync tag input with running timer's tag
+    if (runningTimer.value) {
+      newTag.value = runningTimer.value.tag || ''
+    }
   } catch (err) {
     error.value = err.message
   } finally {
     loading.value = false
+  }
+}
+
+async function fetchTags() {
+  try {
+    tags.value = await api.getTags()
+  } catch (err) {
+    console.error('Failed to fetch tags:', err)
   }
 }
 
@@ -168,8 +176,28 @@ async function toggleTimer() {
   try {
     if (isRunning.value) {
       await api.stopTimer(runningTimer.value.id)
+      newTag.value = ''
     } else {
       await api.createTimer({ tag: newTag.value || null })
+      // Refresh tags after creating a timer with a potentially new tag
+      if (newTag.value && !tags.value.includes(newTag.value)) {
+        fetchTags()
+      }
+    }
+    await fetchTimers()
+  } catch (err) {
+    error.value = err.message
+  }
+}
+
+async function updateRunningTag() {
+  if (!runningTimer.value) return
+  error.value = ''
+  try {
+    await api.updateTimer(runningTimer.value.id, { tag: newTag.value || null })
+    // Refresh tags if it's a new one
+    if (newTag.value && !tags.value.includes(newTag.value)) {
+      fetchTags()
     }
     await fetchTimers()
   } catch (err) {
@@ -182,6 +210,7 @@ async function handleUpdate(id, data) {
   try {
     await api.updateTimer(id, data)
     await fetchTimers()
+    selectedTimer.value = null
   } catch (err) {
     error.value = err.message
   }
@@ -208,11 +237,11 @@ function closeSelectedTimer() {
 
 onMounted(() => {
   fetchTimers()
+  fetchTags()
   tickInterval = setInterval(() => {
     updateCurrentElapsed()
   }, 1000)
   
-  // Connect to WebSocket for real-time updates
   api.addWsListener(onWsMessage)
 })
 
@@ -225,101 +254,146 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="timer-page">
-    <!-- Stats -->
-    <div class="stats">
-      <div class="stat">
-        <span class="stat-label">Today</span>
-        <span class="stat-value">{{ formatDuration(todayTotal) }}</span>
+  <div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1 class="logo">YATT</h1>
+        <button @click="emit('openSettings')" class="settings-btn" title="Settings">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
       </div>
-      <div class="stat">
-        <span class="stat-label">This Week</span>
-        <span class="stat-value">{{ formatDuration(weekTotal) }}</span>
-      </div>
-    </div>
 
-    <!-- Current Timer Display -->
-    <div class="current-timer" v-if="isRunning">
-      <div class="elapsed" v-if="!isEditingElapsed" @click="startEditElapsed">
-        {{ formatHHmmss(currentElapsed) }}
-      </div>
-      <div class="elapsed-edit" v-else>
-        <input 
-          v-model="editElapsedValue" 
-          type="text" 
-          class="elapsed-input"
-          placeholder="HH:mm:ss"
-          @keyup.enter="saveEditElapsed"
-          @keyup.escape="cancelEditElapsed"
-          autofocus
-        />
-        <div class="elapsed-actions">
-          <button @click="cancelEditElapsed" class="cancel-btn">Cancel</button>
-          <button @click="saveEditElapsed" class="save-btn">Save</button>
+      <div class="sidebar-content">
+        <!-- Current Timer Display -->
+        <div class="current-timer-section">
+          <div class="current-timer" :class="{ running: isRunning }">
+            <div class="elapsed" v-if="!isEditingElapsed" @click="isRunning && startEditElapsed()">
+              {{ formatHHmmss(currentElapsed) }}
+            </div>
+            <div class="elapsed-edit" v-else>
+              <input 
+                v-model="editElapsedValue" 
+                type="text" 
+                class="elapsed-input"
+                placeholder="HH:mm:ss"
+                @keyup.enter="saveEditElapsed"
+                @keyup.escape="cancelEditElapsed"
+                autofocus
+              />
+              <div class="elapsed-actions">
+                <button @click="cancelEditElapsed" class="btn-secondary btn-sm">Cancel</button>
+                <button @click="saveEditElapsed" class="btn-primary btn-sm">Save</button>
+              </div>
+            </div>
+            <div class="current-tag" v-if="runningTimer?.tag">{{ runningTimer.tag }}</div>
+            <div class="current-status">{{ isRunning ? 'Running' : 'Stopped' }}</div>
+          </div>
+        </div>
+
+        <!-- Tag Input -->
+        <div class="tag-input-section">
+          <TagInput 
+            v-model="newTag"
+            :tags="tags"
+            :placeholder="isRunning ? 'Change tag...' : 'Tag (optional)'"
+            @submit="isRunning ? updateRunningTag() : toggleTimer()"
+          />
+        </div>
+
+        <!-- Start/Stop Button -->
+        <button 
+          @click="toggleTimer" 
+          class="toggle-button"
+          :class="{ running: isRunning }"
+        >
+          <svg v-if="!isRunning" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          <svg v-else xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="4" width="4" height="16"></rect>
+            <rect x="14" y="4" width="4" height="16"></rect>
+          </svg>
+          {{ isRunning ? 'Stop' : 'Start' }}
+        </button>
+
+        <p v-if="error" class="error">{{ error }}</p>
+
+        <!-- Stats -->
+        <div class="stats">
+          <div class="stat">
+            <span class="stat-value">{{ formatDuration(todayTotal) }}</span>
+            <span class="stat-label">Today</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">{{ formatDuration(weekTotal) }}</span>
+            <span class="stat-label">This Week</span>
+          </div>
         </div>
       </div>
-      <div class="current-tag" v-if="runningTimer?.tag">{{ runningTimer.tag }}</div>
-    </div>
+    </aside>
 
-    <!-- Tag Input -->
-    <div class="tag-input" v-if="!isRunning">
-      <input 
-        v-model="newTag" 
-        type="text" 
-        placeholder="Tag (optional)"
-        @keyup.enter="toggleTimer"
-      />
-    </div>
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- View Toggle -->
+      <div class="content-header">
+        <div class="view-toggle">
+          <button 
+            @click="viewMode = 'calendar'" 
+            :class="{ active: viewMode === 'calendar' }"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+            Calendar
+          </button>
+          <button 
+            @click="viewMode = 'list'" 
+            :class="{ active: viewMode === 'list' }"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="8" y1="6" x2="21" y2="6"></line>
+              <line x1="8" y1="12" x2="21" y2="12"></line>
+              <line x1="8" y1="18" x2="21" y2="18"></line>
+              <line x1="3" y1="6" x2="3.01" y2="6"></line>
+              <line x1="3" y1="12" x2="3.01" y2="12"></line>
+              <line x1="3" y1="18" x2="3.01" y2="18"></line>
+            </svg>
+            List
+          </button>
+        </div>
+      </div>
 
-    <!-- Big Button -->
-    <button 
-      @click="toggleTimer" 
-      class="big-button"
-      :class="{ running: isRunning }"
-    >
-      {{ isRunning ? 'Stop' : 'Start' }}
-    </button>
+      <!-- Calendar View -->
+      <div class="content-body" v-if="viewMode === 'calendar'">
+        <WeeklyCalendar 
+          :timers="timers" 
+          :currentElapsed="currentElapsed"
+          @select="selectTimerFromCalendar"
+        />
+      </div>
 
-    <p v-if="error" class="error">{{ error }}</p>
-
-    <!-- View Toggle -->
-    <div class="view-toggle">
-      <button 
-        @click="viewMode = 'list'" 
-        :class="{ active: viewMode === 'list' }"
-      >
-        List
-      </button>
-      <button 
-        @click="viewMode = 'calendar'" 
-        :class="{ active: viewMode === 'calendar' }"
-      >
-        Calendar
-      </button>
-    </div>
-
-    <!-- Timer List View -->
-    <div class="timer-list" v-if="viewMode === 'list'">
-      <h3>History</h3>
-      <p v-if="loading" class="loading">Loading...</p>
-      <p v-else-if="timers.length === 0" class="empty">No timers yet</p>
-      <TimerItem 
-        v-for="timer in timers" 
-        :key="timer.id" 
-        :timer="timer"
-        @update="handleUpdate"
-        @delete="handleDelete"
-      />
-    </div>
-
-    <!-- Calendar View -->
-    <div class="calendar-view" v-if="viewMode === 'calendar'">
-      <WeeklyCalendar 
-        :timers="timers" 
-        :currentElapsed="currentElapsed"
-        @select="selectTimerFromCalendar"
-      />
-    </div>
+      <!-- List View -->
+      <div class="content-body list-view" v-else>
+        <p v-if="loading" class="loading">Loading...</p>
+        <p v-else-if="timers.length === 0" class="empty">No timers yet</p>
+        <div class="timer-list">
+          <TimerItem 
+            v-for="timer in timers" 
+            :key="timer.id" 
+            :timer="timer"
+            @update="handleUpdate"
+            @delete="handleDelete"
+          />
+        </div>
+      </div>
+    </main>
 
     <!-- Selected Timer Modal (for calendar view) -->
     <div class="timer-modal-overlay" v-if="selectedTimer" @click.self="closeSelectedTimer">
@@ -336,56 +410,97 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.timer-page {
+.layout {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+}
+
+/* Sidebar */
+.sidebar {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  height: 100vh;
+  position: sticky;
+  top: 0;
 }
 
-.stats {
+.sidebar-header {
   display: flex;
-  gap: 1rem;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
 }
 
-.stat {
-  flex: 1;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 1rem;
-  text-align: center;
+.logo {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--accent-color);
 }
 
-.stat-label {
-  display: block;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 0.25rem;
+.settings-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 0.5rem;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.stat-value {
-  font-size: 1.25rem;
-  font-weight: 600;
+.settings-btn:hover {
+  background: var(--bg-tertiary);
   color: var(--text-primary);
 }
 
-.current-timer {
+.sidebar-content {
+  flex: 1;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  overflow-y: auto;
+}
+
+/* Current Timer */
+.current-timer-section {
   text-align: center;
-  padding: 1rem 0;
+}
+
+.current-timer {
+  padding: 1.5rem;
+  background: var(--bg-primary);
+  border-radius: 16px;
+  border: 2px solid var(--border-color);
+  transition: border-color 0.3s, background 0.3s;
+}
+
+.current-timer.running {
+  border-color: var(--success-color);
+  background: var(--timer-bg);
 }
 
 .elapsed {
-  font-size: 3rem;
+  font-size: 2.5rem;
   font-weight: 300;
-  color: var(--accent-color);
+  color: var(--text-primary);
   font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transition: opacity 0.2s;
+  cursor: default;
+  transition: color 0.2s;
 }
 
-.elapsed:hover {
+.current-timer.running .elapsed {
+  color: var(--accent-color);
+  cursor: pointer;
+}
+
+.current-timer.running .elapsed:hover {
   opacity: 0.8;
 }
 
@@ -397,11 +512,11 @@ onUnmounted(() => {
 }
 
 .elapsed-input {
-  font-size: 2.5rem;
+  font-size: 2rem;
   font-weight: 300;
   font-variant-numeric: tabular-nums;
   text-align: center;
-  width: 10rem;
+  width: 100%;
   padding: 0.5rem;
   background: var(--bg-secondary);
   border: 2px solid var(--accent-color);
@@ -419,86 +534,119 @@ onUnmounted(() => {
   gap: 0.5rem;
 }
 
-.elapsed-actions button {
-  padding: 0.375rem 0.75rem;
-  border-radius: 6px;
+.current-tag {
+  margin-top: 0.5rem;
+  color: var(--text-secondary);
   font-size: 0.875rem;
   font-weight: 500;
 }
 
-.elapsed-actions .cancel-btn {
-  background: transparent;
-  border: 1px solid var(--border-light);
-  color: var(--text-secondary);
+.current-status {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.elapsed-actions .cancel-btn:hover {
-  border-color: var(--border-color);
-  color: var(--text-primary);
+/* Tag Input */
+.tag-input-section {
+  width: 100%;
 }
 
-.elapsed-actions .save-btn {
+/* Toggle Button */
+.toggle-button {
+  width: 100%;
+  padding: 1rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 12px;
+  background: var(--success-color);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: transform 0.1s, background 0.2s;
+}
+
+.toggle-button:hover {
+  background: var(--success-hover);
+}
+
+.toggle-button:active {
+  transform: scale(0.98);
+}
+
+.toggle-button.running {
+  background: var(--danger-color);
+}
+
+.toggle-button.running:hover {
+  background: var(--danger-hover);
+}
+
+/* Buttons */
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.btn-primary {
   background: var(--accent-color);
   border: none;
   color: #fff;
 }
 
-.elapsed-actions .save-btn:hover {
+.btn-primary:hover {
   background: var(--accent-hover);
 }
 
-.current-tag {
-  margin-top: 0.5rem;
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border-light);
   color: var(--text-secondary);
-  font-size: 1rem;
 }
 
-.tag-input input {
-  width: 100%;
-  padding: 0.875rem 1rem;
-  background: var(--bg-secondary);
+.btn-secondary:hover {
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+/* Stats */
+.stats {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: auto;
+}
+
+.stat {
+  flex: 1;
+  background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  color: var(--text-primary);
-  font-size: 1rem;
+  padding: 1rem;
   text-align: center;
 }
 
-.tag-input input:focus {
-  outline: none;
-  border-color: var(--accent-color);
-}
-
-.tag-input input::placeholder {
-  color: var(--text-muted);
-}
-
-.big-button {
-  width: 100%;
-  padding: 1.5rem;
-  font-size: 1.5rem;
+.stat-value {
+  display: block;
+  font-size: 1.125rem;
   font-weight: 600;
-  border: none;
-  border-radius: 16px;
-  background: var(--success-color);
-  color: #fff;
-  transition: transform 0.1s, background 0.2s;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
-.big-button:hover {
-  background: var(--success-hover);
-}
-
-.big-button:active {
-  transform: scale(0.98);
-}
-
-.big-button.running {
-  background: var(--danger-color);
-}
-
-.big-button.running:hover {
-  background: var(--danger-hover);
+.stat-label {
+  display: block;
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 0.25rem;
 }
 
 .error {
@@ -507,62 +655,76 @@ onUnmounted(() => {
   font-size: 0.875rem;
 }
 
-.timer-list {
-  margin-top: 1rem;
+/* Main Content */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100vh;
+  overflow: hidden;
 }
 
-.timer-list h3 {
+.content-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.view-toggle {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--bg-secondary);
+  padding: 0.25rem;
+  border-radius: 8px;
+}
+
+.view-toggle button {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-secondary);
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--text-secondary);
-  margin-bottom: 1rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s;
+}
+
+.view-toggle button:hover {
+  color: var(--text-primary);
+}
+
+.view-toggle button.active {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.content-body {
+  flex: 1;
+  overflow: auto;
+}
+
+.content-body.list-view {
+  padding: 1.5rem;
+}
+
+.timer-list {
+  max-width: 800px;
 }
 
 .loading, .empty {
   text-align: center;
   color: var(--text-muted);
-  padding: 2rem;
+  padding: 3rem;
 }
 
-.view-toggle {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: center;
-}
-
-.view-toggle button {
-  padding: 0.5rem 1.5rem;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.view-toggle button:hover {
-  border-color: var(--border-light);
-  color: var(--text-primary);
-}
-
-.view-toggle button.active {
-  background: var(--accent-color);
-  border-color: var(--accent-color);
-  color: #fff;
-}
-
-.calendar-view {
-  margin-top: 1rem;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--bg-secondary);
-}
-
+/* Modal */
 .timer-modal-overlay {
   position: fixed;
   top: 0;
@@ -580,7 +742,7 @@ onUnmounted(() => {
   background: var(--bg-primary);
   border-radius: 12px;
   padding: 1.5rem;
-  min-width: 320px;
+  min-width: 360px;
   max-width: 90%;
   position: relative;
 }
@@ -600,5 +762,43 @@ onUnmounted(() => {
 
 .close-btn:hover {
   color: var(--text-primary);
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .layout {
+    flex-direction: column;
+  }
+  
+  .sidebar {
+    width: 100%;
+    min-width: 100%;
+    height: auto;
+    position: relative;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+  
+  .sidebar-content {
+    padding: 1rem;
+    gap: 1rem;
+  }
+  
+  .current-timer {
+    padding: 1rem;
+  }
+  
+  .elapsed {
+    font-size: 2rem;
+  }
+  
+  .stats {
+    margin-top: 0;
+  }
+  
+  .main-content {
+    height: auto;
+    min-height: 50vh;
+  }
 }
 </style>

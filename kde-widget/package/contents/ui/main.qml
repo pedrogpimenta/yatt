@@ -21,6 +21,9 @@ PlasmoidItem {
     property int baseWeek: 0
     
     property bool wsConnected: false
+    
+    property var availableTags: []
+    property string newTag: ""
 
     // WebSocket for real-time updates
     WebSocket {
@@ -120,7 +123,16 @@ PlasmoidItem {
     Component.onCompleted: {
         if (token) {
             fetchTimers()
+            fetchTags()
         }
+    }
+
+    function fetchTags() {
+        apiRequest("/timers/tags", "GET", null, function(tags) {
+            if (tags) {
+                availableTags = tags
+            }
+        })
     }
 
     function formatDuration(ms) {
@@ -208,6 +220,8 @@ PlasmoidItem {
                     currentTimer = timers[i]
                     var start = new Date(currentTimer.start_time).getTime()
                     currentElapsed = Date.now() - start
+                    // Sync tag input with running timer's tag
+                    newTag = currentTimer.tag || ""
                     break
                 }
             }
@@ -255,12 +269,41 @@ PlasmoidItem {
         if (isRunning) {
             apiRequest("/timers/" + currentTimer.id + "/stop", "POST", null, function() {
                 fetchTimers()
+                newTag = ""
             })
         } else {
-            apiRequest("/timers", "POST", {}, function() {
+            var body = {}
+            if (newTag && newTag.trim() !== "") {
+                body.tag = newTag.trim()
+            }
+            apiRequest("/timers", "POST", body, function() {
                 fetchTimers()
+                fetchTags()
             })
         }
+    }
+
+    function updateRunningTag() {
+        if (!currentTimer) return
+        var body = { tag: newTag && newTag.trim() !== "" ? newTag.trim() : null }
+        apiRequest("/timers/" + currentTimer.id, "PATCH", body, function() {
+            fetchTimers()
+            fetchTags()
+        })
+    }
+
+    function getFilteredTags(query) {
+        if (!availableTags || availableTags.length === 0) return []
+        
+        var q = query.toLowerCase().trim()
+        var result = []
+        
+        for (var i = 0; i < availableTags.length && result.length < 5; i++) {
+            if (!q || availableTags[i].toLowerCase().indexOf(q) !== -1) {
+                result.push(availableTags[i])
+            }
+        }
+        return result
     }
 
     function updateCurrentTimer(data) {

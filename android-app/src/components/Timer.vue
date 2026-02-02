@@ -4,11 +4,13 @@ import { api } from '../api.js'
 import { startTimerNotification, stopTimerNotification, requestPermissions } from '../notifications.js'
 import TimerItem from './TimerItem.vue'
 import WeeklyCalendar from './WeeklyCalendar.vue'
+import TagInput from './TagInput.vue'
 
 const timers = ref([])
 const loading = ref(true)
 const error = ref('')
 const newTag = ref('')
+const tags = ref([])
 const viewMode = ref('list') // 'list' or 'calendar'
 const selectedTimer = ref(null)
 
@@ -152,8 +154,9 @@ async function fetchTimers() {
     timers.value = await api.getTimers()
     updateCurrentElapsed()
     
-    // Update notification state
+    // Sync tag input with running timer's tag
     if (runningTimer.value) {
+      newTag.value = runningTimer.value.tag || ''
       await startTimerNotification(
         runningTimer.value.start_time, 
         runningTimer.value.tag,
@@ -169,15 +172,43 @@ async function fetchTimers() {
   }
 }
 
+async function fetchTags() {
+  try {
+    tags.value = await api.getTags()
+  } catch (err) {
+    console.error('Failed to fetch tags:', err)
+  }
+}
+
 async function toggleTimer() {
   error.value = ''
   try {
     if (isRunning.value) {
       await api.stopTimer(runningTimer.value.id)
       await stopTimerNotification()
+      newTag.value = ''
     } else {
       await requestPermissions()
       await api.createTimer({ tag: newTag.value || null })
+      // Refresh tags after creating a timer with a potentially new tag
+      if (newTag.value && !tags.value.includes(newTag.value)) {
+        fetchTags()
+      }
+    }
+    await fetchTimers()
+  } catch (err) {
+    error.value = err.message
+  }
+}
+
+async function updateRunningTag() {
+  if (!runningTimer.value) return
+  error.value = ''
+  try {
+    await api.updateTimer(runningTimer.value.id, { tag: newTag.value || null })
+    // Refresh tags if it's a new one
+    if (newTag.value && !tags.value.includes(newTag.value)) {
+      fetchTags()
     }
     await fetchTimers()
   } catch (err) {
@@ -216,6 +247,7 @@ function closeSelectedTimer() {
 
 onMounted(() => {
   fetchTimers()
+  fetchTags()
   tickInterval = setInterval(() => {
     updateCurrentElapsed()
   }, 1000)
@@ -270,12 +302,12 @@ onUnmounted(() => {
     </div>
 
     <!-- Tag Input -->
-    <div class="tag-input" v-if="!isRunning">
-      <input 
-        v-model="newTag" 
-        type="text" 
-        placeholder="Tag (optional)"
-        @keyup.enter="toggleTimer"
+    <div class="tag-input-section">
+      <TagInput 
+        v-model="newTag"
+        :tags="tags"
+        :placeholder="isRunning ? 'Change tag...' : 'Tag (optional)'"
+        @submit="isRunning ? updateRunningTag() : toggleTimer()"
       />
     </div>
 
@@ -461,24 +493,8 @@ onUnmounted(() => {
   font-size: 1rem;
 }
 
-.tag-input input {
+.tag-input-section {
   width: 100%;
-  padding: 0.875rem 1rem;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  color: var(--text-primary);
-  font-size: 1rem;
-  text-align: center;
-}
-
-.tag-input input:focus {
-  outline: none;
-  border-color: var(--accent-color);
-}
-
-.tag-input input::placeholder {
-  color: var(--text-muted);
 }
 
 .big-button {

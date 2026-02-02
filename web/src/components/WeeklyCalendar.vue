@@ -52,7 +52,6 @@ const weekTimers = computed(() => {
   return props.timers.filter(timer => {
     const start = new Date(timer.start_time)
     const end = timer.end_time ? new Date(timer.end_time) : new Date()
-    // Timer overlaps with this week if it starts before week ends and ends after week starts
     return start < weekEnd.value && end >= weekStart.value
   })
 })
@@ -67,17 +66,14 @@ function getTimersForDay(dayDate) {
   return weekTimers.value.filter(timer => {
     const start = new Date(timer.start_time)
     const end = timer.end_time ? new Date(timer.end_time) : new Date()
-    // Timer overlaps with this day
     return start <= dayEnd && end >= dayStart
   }).map(timer => {
     const timerStart = new Date(timer.start_time)
     const timerEnd = timer.end_time ? new Date(timer.end_time) : new Date()
     
-    // Clamp to day boundaries for display
     const displayStart = timerStart < dayStart ? dayStart : timerStart
     const displayEnd = timerEnd > dayEnd ? dayEnd : timerEnd
     
-    // Calculate position as percentage of day (24 hours)
     const startMinutes = displayStart.getHours() * 60 + displayStart.getMinutes()
     const endMinutes = displayEnd.getHours() * 60 + displayEnd.getMinutes()
     
@@ -97,10 +93,6 @@ function getTimersForDay(dayDate) {
 
 function formatDate(date) {
   return date.getDate()
-}
-
-function formatMonth(date) {
-  return date.toLocaleDateString([], { month: 'short' })
 }
 
 function formatHour(hour) {
@@ -159,44 +151,61 @@ const weekLabel = computed(() => {
     </div>
     
     <!-- Calendar Grid -->
-    <div class="calendar-container">
-      <!-- Time column -->
-      <div class="time-column">
-        <div class="day-header"></div>
-        <div class="hours">
-          <div v-for="hour in hours" :key="hour" class="hour-label">
-            {{ formatHour(hour) }}
+    <div class="calendar-wrapper">
+      <!-- Fixed Header -->
+      <div class="calendar-header">
+        <div class="time-header"></div>
+        <div class="days-header">
+          <div 
+            v-for="(day, index) in days" 
+            :key="index" 
+            class="day-header"
+            :class="{ today: isToday(day) }"
+          >
+            <span class="day-name">{{ dayNames[index] }}</span>
+            <span class="day-date" :class="{ 'is-today': isToday(day) }">{{ formatDate(day) }}</span>
           </div>
         </div>
       </div>
       
-      <!-- Day columns -->
-      <div class="days-container">
-        <div 
-          v-for="(day, index) in days" 
-          :key="index" 
-          class="day-column"
-          :class="{ today: isToday(day) }"
-        >
-          <div class="day-header">
-            <span class="day-name">{{ dayNames[index] }}</span>
-            <span class="day-date" :class="{ 'is-today': isToday(day) }">{{ formatDate(day) }}</span>
+      <!-- Scrollable Body -->
+      <div class="calendar-body">
+        <div class="calendar-grid">
+          <!-- Time column -->
+          <div class="time-column">
+            <div v-for="hour in hours" :key="hour" class="hour-label">
+              {{ formatHour(hour) }}
+            </div>
           </div>
-          <div class="day-body">
-            <!-- Hour grid lines -->
-            <div v-for="hour in hours" :key="hour" class="hour-slot"></div>
+          
+          <!-- Days grid -->
+          <div class="days-grid">
+            <!-- Hour rows (background) -->
+            <div class="hour-rows">
+              <div v-for="hour in hours" :key="hour" class="hour-row"></div>
+            </div>
             
-            <!-- Timer blocks -->
-            <div 
-              v-for="timer in getTimersForDay(day)" 
-              :key="timer.id"
-              class="timer-block"
-              :class="{ running: timer.isRunning }"
-              :style="{ top: timer.top, height: timer.height }"
-              @click="selectTimer(timer)"
-              :title="`${timer.tag || 'No tag'}\n${formatTime(timer.displayStart)} - ${timer.isRunning ? 'Running' : formatTime(timer.displayEnd)}`"
-            >
-              <span class="timer-tag">{{ timer.tag || 'No tag' }}</span>
+            <!-- Day columns with timers -->
+            <div class="day-columns">
+              <div 
+                v-for="(day, index) in days" 
+                :key="index" 
+                class="day-column"
+                :class="{ today: isToday(day) }"
+              >
+                <!-- Timer blocks -->
+                <div 
+                  v-for="timer in getTimersForDay(day)" 
+                  :key="timer.id"
+                  class="timer-block"
+                  :class="{ running: timer.isRunning }"
+                  :style="{ top: timer.top, height: timer.height }"
+                  @click="selectTimer(timer)"
+                  :title="`${timer.tag || 'No tag'}\n${formatTime(timer.displayStart)} - ${timer.isRunning ? 'Running' : formatTime(timer.displayEnd)}`"
+                >
+                  <span class="timer-tag">{{ timer.tag || 'No tag' }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -210,7 +219,7 @@ const weekLabel = computed(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-height: 500px;
+  overflow: hidden;
 }
 
 .calendar-nav {
@@ -218,8 +227,10 @@ const weekLabel = computed(() => {
   align-items: center;
   justify-content: center;
   gap: 1rem;
-  padding: 0.75rem;
+  padding: 1rem 1.5rem;
   border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  flex-shrink: 0;
 }
 
 .nav-btn {
@@ -258,63 +269,53 @@ const weekLabel = computed(() => {
   text-align: center;
 }
 
-.calendar-container {
-  display: flex;
+.calendar-wrapper {
   flex: 1;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.time-column {
+/* Fixed Header */
+.calendar-header {
+  display: flex;
   flex-shrink: 0;
-  width: 50px;
-  border-right: 1px solid var(--border-color);
-}
-
-.time-column .day-header {
-  height: 50px;
   border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  z-index: 10;
 }
 
-.hours {
-  position: relative;
-}
-
-.hour-label {
-  height: 40px;
-  font-size: 0.625rem;
-  color: var(--text-muted);
-  text-align: right;
-  padding-right: 0.5rem;
-  transform: translateY(-50%);
-}
-
-.days-container {
-  display: flex;
-  flex: 1;
-}
-
-.day-column {
-  flex: 1;
-  min-width: 80px;
+.time-header {
+  width: 60px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
 }
 
-.day-column:last-child {
-  border-right: none;
-}
-
-.day-column.today {
-  background: var(--timer-bg);
+.days-header {
+  flex: 1;
+  display: flex;
 }
 
 .day-header {
-  height: 50px;
+  flex: 1;
+  min-width: 80px;
+  height: 60px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-bottom: 1px solid var(--border-color);
-  padding: 0.25rem;
+  border-right: 1px solid var(--border-color);
+  padding: 0.5rem;
+  background: var(--bg-primary);
+}
+
+.day-header:last-child {
+  border-right: none;
+}
+
+.day-header.today {
+  background: var(--timer-bg);
 }
 
 .day-name {
@@ -340,37 +341,113 @@ const weekLabel = computed(() => {
   justify-content: center;
 }
 
-.day-body {
-  position: relative;
-  height: calc(24 * 40px);
+/* Scrollable Body */
+.calendar-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
-.hour-slot {
-  height: 40px;
+.calendar-grid {
+  display: flex;
+  min-height: calc(24 * 48px);
+}
+
+.time-column {
+  width: 60px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+}
+
+.hour-label {
+  height: 48px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-align: right;
+  padding-right: 0.5rem;
+  padding-top: 0;
+  transform: translateY(-50%);
+}
+
+.days-grid {
+  flex: 1;
+  position: relative;
+}
+
+/* Hour rows (horizontal lines) */
+.hour-rows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.hour-row {
+  height: 48px;
   border-bottom: 1px solid var(--border-color);
 }
 
-.hour-slot:nth-child(even) {
+.hour-row:nth-child(even) {
   background: var(--bg-secondary);
-  opacity: 0.3;
+  opacity: 0.5;
 }
 
+/* Day columns (vertical divisions) */
+.day-columns {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+}
+
+.day-column {
+  flex: 1;
+  min-width: 80px;
+  position: relative;
+  border-right: 1px solid var(--border-color);
+}
+
+.day-column:last-child {
+  border-right: none;
+}
+
+.day-column.today::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--accent-color);
+  opacity: 0.08;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Timer blocks */
 .timer-block {
   position: absolute;
-  left: 2px;
-  right: 2px;
+  left: 3px;
+  right: 3px;
   background: var(--accent-color);
-  border-radius: 4px;
-  padding: 2px 4px;
+  border-radius: 6px;
+  padding: 4px 6px;
   overflow: hidden;
   cursor: pointer;
   opacity: 0.9;
-  transition: opacity 0.2s;
-  z-index: 1;
+  transition: opacity 0.2s, transform 0.1s;
+  z-index: 5;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 
 .timer-block:hover {
   opacity: 1;
+  transform: scale(1.02);
+  z-index: 6;
 }
 
 .timer-block.running {
@@ -384,7 +461,8 @@ const weekLabel = computed(() => {
 }
 
 .timer-tag {
-  font-size: 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 500;
   color: #fff;
   white-space: nowrap;
   overflow: hidden;

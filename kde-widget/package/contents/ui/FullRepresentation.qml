@@ -15,6 +15,7 @@ PlasmaExtras.Representation {
     property bool editingStartTime: false
     property string editStartDate: ""
     property string editStartTime: ""
+    property bool showTagSuggestions: false
 
     Layout.minimumWidth: Kirigami.Units.gridUnit * 14
     Layout.minimumHeight: Kirigami.Units.gridUnit * 10
@@ -169,14 +170,6 @@ PlasmaExtras.Representation {
                 }
             }
 
-            Text {
-                Layout.alignment: Qt.AlignHCenter
-                visible: root.isRunning && root.currentTimer && root.currentTimer.tag && !fullRoot.editingElapsed
-                text: root.currentTimer ? (root.currentTimer.tag || "") : ""
-                color: Kirigami.Theme.textColor
-                opacity: 0.7
-            }
-
             // Start time display (clickable to edit)
             Text {
                 Layout.alignment: Qt.AlignHCenter
@@ -234,6 +227,80 @@ PlasmaExtras.Representation {
                     PlasmaComponents.Button {
                         text: "Save"
                         onClicked: fullRoot.saveEdit()
+                    }
+                }
+            }
+        }
+
+        // Tag input (shown always)
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 2
+
+            QQC2.TextField {
+                id: tagField
+                Layout.fillWidth: true
+                text: root.newTag
+                placeholderText: root.isRunning ? "Change tag..." : "Tag (optional)"
+                horizontalAlignment: Text.AlignHCenter
+                onTextChanged: {
+                    root.newTag = text
+                    fullRoot.showTagSuggestions = text.length > 0 || activeFocus
+                }
+                onAccepted: {
+                    if (root.isRunning) {
+                        root.updateRunningTag()
+                    } else {
+                        root.toggleTimer()
+                    }
+                }
+                onActiveFocusChanged: {
+                    if (activeFocus) {
+                        fullRoot.showTagSuggestions = true
+                    } else {
+                        // Delay hiding to allow click on suggestion
+                        hideTimer.start()
+                    }
+                }
+            }
+
+            Timer {
+                id: hideTimer
+                interval: 150
+                onTriggered: fullRoot.showTagSuggestions = false
+            }
+
+            // Tag suggestions
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: suggestionsColumn.height
+                visible: fullRoot.showTagSuggestions && root.availableTags.length > 0
+                color: Kirigami.Theme.backgroundColor
+                border.color: Kirigami.Theme.disabledTextColor
+                border.width: 1
+                radius: Kirigami.Units.smallSpacing
+
+                ColumnLayout {
+                    id: suggestionsColumn
+                    width: parent.width
+                    spacing: 0
+
+                    Repeater {
+                        model: root.getFilteredTags(root.newTag)
+
+                        delegate: QQC2.ItemDelegate {
+                            Layout.fillWidth: true
+                            text: modelData
+                            onClicked: {
+                                root.newTag = modelData
+                                tagField.text = modelData
+                                fullRoot.showTagSuggestions = false
+                                if (root.isRunning) {
+                                    root.updateRunningTag()
+                                }
+                                tagField.forceActiveFocus()
+                            }
+                        }
                     }
                 }
             }

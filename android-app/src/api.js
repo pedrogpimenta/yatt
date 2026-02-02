@@ -214,6 +214,10 @@ export const api = {
     return request('/timers')
   },
 
+  getTags() {
+    return request('/timers/tags')
+  },
+
   createTimer(data = {}) {
     return request('/timers', {
       method: 'POST',

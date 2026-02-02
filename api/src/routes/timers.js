@@ -31,6 +31,25 @@ router.get('/', (req, res) => {
   }
 });
 
+// Get unique tags for current user (sorted by most recently used)
+router.get('/tags', (req, res) => {
+  try {
+    const tags = db.prepare(`
+      SELECT tag, MAX(start_time) as last_used
+      FROM timers 
+      WHERE user_id = ? AND tag IS NOT NULL AND tag != ''
+      GROUP BY tag
+      ORDER BY last_used DESC
+      LIMIT 50
+    `).all(req.userId);
+
+    res.json(tags.map(t => t.tag));
+  } catch (err) {
+    console.error('Get tags error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Get single timer
 router.get('/:id', (req, res) => {
   try {

@@ -73,14 +73,30 @@ async function handleSubmit() {
 
 <style scoped>
 .login {
-  max-width: 320px;
-  margin: 2rem auto;
+  max-width: 360px;
+  margin: 0 auto;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100vh;
 }
 
 h2 {
   text-align: center;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  font-size: 1.5rem;
+}
+
+.login::before {
+  content: 'YATT';
+  display: block;
+  text-align: center;
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--accent-color);
   margin-bottom: 2rem;
-  font-weight: 500;
 }
 
 form {

@@ -33,20 +33,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="app">
-    <header>
-      <h1>YATT</h1>
-      <button v-if="isLoggedIn" @click="openSettings" class="settings-btn">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-        </svg>
-      </button>
-    </header>
-    <main>
-      <Login v-if="!isLoggedIn" @login="handleLogin" />
-      <Timer v-else />
-    </main>
+  <div class="app" :class="{ 'logged-in': isLoggedIn }">
+    <Login v-if="!isLoggedIn" @login="handleLogin" />
+    <Timer v-else @openSettings="openSettings" />
     
     <!-- Settings Modal -->
     <Settings 
@@ -75,6 +64,7 @@ onMounted(() => {
   --danger-hover: #dc2626;
   --timer-bg: #e8f4ff;
   --timer-border: #4a9eff;
+  --sidebar-width: 320px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -112,45 +102,11 @@ body {
 }
 
 .app {
-  max-width: 600px;
-  margin: 0 auto;
-  padding: 1rem;
+  min-height: 100vh;
 }
 
-header {
+.app.logged-in {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 0;
-  border-bottom: 1px solid var(--border-color);
-  margin-bottom: 2rem;
-}
-
-header h1 {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.settings-btn {
-  background: transparent;
-  border: 1px solid var(--border-light);
-  color: var(--text-secondary);
-  padding: 0.5rem;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.settings-btn:hover {
-  border-color: var(--border-color);
-  color: var(--text-primary);
-}
-
-.settings-btn svg {
-  display: block;
 }
 
 button {
