@@ -195,6 +195,21 @@ export const api = {
     return data
   },
 
+  getMe() {
+    return request('/auth/me')
+  },
+
+  changePassword(currentPassword, newPassword) {
+    return request('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword })
+    })
+  },
+
+  async getToken() {
+    return await getToken()
+  },
+
   getTimers() {
     return request('/timers')
   },

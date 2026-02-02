@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.extras as PlasmaExtras
+import org.kde.plasma.plasmoid
 import org.kde.kirigami as Kirigami
 
 PlasmaExtras.Representation {
@@ -89,6 +90,12 @@ PlasmaExtras.Representation {
                 icon.name: "view-refresh"
                 onClicked: root.fetchTimers()
                 PlasmaComponents.ToolTip { text: "Refresh" }
+            }
+
+            PlasmaComponents.ToolButton {
+                icon.name: "internet-web-browser"
+                onClicked: Qt.openUrlExternally("http://localhost:5173")
+                PlasmaComponents.ToolTip { text: "Open Web App" }
             }
 
             PlasmaComponents.ToolButton {

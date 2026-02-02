@@ -2,11 +2,14 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { api } from '../api.js'
 import TimerItem from './TimerItem.vue'
+import WeeklyCalendar from './WeeklyCalendar.vue'
 
 const timers = ref([])
 const loading = ref(true)
 const error = ref('')
 const newTag = ref('')
+const viewMode = ref('list') // 'list' or 'calendar'
+const selectedTimer = ref(null)
 
 let tickInterval = null
 
@@ -189,9 +192,18 @@ async function handleDelete(id) {
   try {
     await api.deleteTimer(id)
     await fetchTimers()
+    selectedTimer.value = null
   } catch (err) {
     error.value = err.message
   }
+}
+
+function selectTimerFromCalendar(timer) {
+  selectedTimer.value = timer
+}
+
+function closeSelectedTimer() {
+  selectedTimer.value = null
 }
 
 onMounted(() => {
@@ -270,8 +282,24 @@ onUnmounted(() => {
 
     <p v-if="error" class="error">{{ error }}</p>
 
-    <!-- Timer List -->
-    <div class="timer-list">
+    <!-- View Toggle -->
+    <div class="view-toggle">
+      <button 
+        @click="viewMode = 'list'" 
+        :class="{ active: viewMode === 'list' }"
+      >
+        List
+      </button>
+      <button 
+        @click="viewMode = 'calendar'" 
+        :class="{ active: viewMode === 'calendar' }"
+      >
+        Calendar
+      </button>
+    </div>
+
+    <!-- Timer List View -->
+    <div class="timer-list" v-if="viewMode === 'list'">
       <h3>History</h3>
       <p v-if="loading" class="loading">Loading...</p>
       <p v-else-if="timers.length === 0" class="empty">No timers yet</p>
@@ -282,6 +310,27 @@ onUnmounted(() => {
         @update="handleUpdate"
         @delete="handleDelete"
       />
+    </div>
+
+    <!-- Calendar View -->
+    <div class="calendar-view" v-if="viewMode === 'calendar'">
+      <WeeklyCalendar 
+        :timers="timers" 
+        :currentElapsed="currentElapsed"
+        @select="selectTimerFromCalendar"
+      />
+    </div>
+
+    <!-- Selected Timer Modal (for calendar view) -->
+    <div class="timer-modal-overlay" v-if="selectedTimer" @click.self="closeSelectedTimer">
+      <div class="timer-modal">
+        <button class="close-btn" @click="closeSelectedTimer">&times;</button>
+        <TimerItem 
+          :timer="selectedTimer"
+          @update="handleUpdate"
+          @delete="handleDelete"
+        />
+      </div>
     </div>
   </div>
 </template>
@@ -475,5 +524,81 @@ onUnmounted(() => {
   text-align: center;
   color: var(--text-muted);
   padding: 2rem;
+}
+
+.view-toggle {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.view-toggle button {
+  padding: 0.5rem 1.5rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.view-toggle button:hover {
+  border-color: var(--border-light);
+  color: var(--text-primary);
+}
+
+.view-toggle button.active {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: #fff;
+}
+
+.calendar-view {
+  margin-top: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+.timer-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.timer-modal {
+  background: var(--bg-primary);
+  border-radius: 12px;
+  padding: 1.5rem;
+  min-width: 320px;
+  max-width: 90%;
+  position: relative;
+}
+
+.close-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: var(--text-primary);
 }
 </style>

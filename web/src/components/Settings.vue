@@ -2,10 +2,8 @@
 import { ref, onMounted } from 'vue'
 import { api } from '../api.js'
 
-const emit = defineEmits(['close', 'saved', 'logout'])
+const emit = defineEmits(['close', 'logout'])
 
-const apiUrl = ref('')
-const saving = ref(false)
 const user = ref(null)
 const loading = ref(true)
 const error = ref('')
@@ -17,37 +15,20 @@ const newPassword = ref('')
 const confirmPassword = ref('')
 const changingPassword = ref(false)
 
-// Token
-const token = ref('')
+// Token visibility
 const showToken = ref(false)
 const tokenCopied = ref(false)
 
-onMounted(async () => {
-  apiUrl.value = await api.getApiUrl()
-  token.value = await api.getToken() || ''
-  await fetchUser()
-})
+const token = api.getToken()
 
 async function fetchUser() {
   try {
-    const loggedIn = await api.isLoggedIn()
-    if (loggedIn) {
-      user.value = await api.getMe()
-    }
+    user.value = await api.getMe()
   } catch (err) {
-    // User might not be logged in
+    error.value = err.message
   } finally {
     loading.value = false
   }
-}
-
-async function saveApiUrl() {
-  saving.value = true
-  await api.setApiUrl(apiUrl.value)
-  saving.value = false
-  emit('saved')
-  success.value = 'API URL saved'
-  setTimeout(() => success.value = '', 2000)
 }
 
 async function handleChangePassword() {
@@ -86,7 +67,7 @@ async function handleChangePassword() {
 
 async function copyToken() {
   try {
-    await navigator.clipboard.writeText(token.value)
+    await navigator.clipboard.writeText(token)
     tokenCopied.value = true
     setTimeout(() => {
       tokenCopied.value = false
@@ -98,42 +79,27 @@ async function copyToken() {
 
 function handleLogout() {
   emit('logout')
-  emit('close')
 }
+
+onMounted(() => {
+  fetchUser()
+})
 </script>
 
 <template>
-  <div class="overlay" @click.self="$emit('close')">
-    <div class="modal">
-      <div class="modal-header">
+  <div class="settings-overlay" @click.self="emit('close')">
+    <div class="settings-modal">
+      <div class="settings-header">
         <h2>Settings</h2>
-        <button class="close-btn" @click="$emit('close')">&times;</button>
+        <button class="close-btn" @click="emit('close')">&times;</button>
       </div>
-
-      <div class="modal-content">
-        <!-- API URL -->
+      
+      <div class="settings-content">
+        <!-- Account Info -->
         <section class="settings-section">
-          <h3>Server</h3>
-          <div class="field">
-            <label for="apiUrl">API Server URL</label>
-            <div class="input-row">
-              <input 
-                id="apiUrl"
-                v-model="apiUrl" 
-                type="url" 
-                placeholder="http://192.168.1.100:3000"
-              />
-              <button @click="saveApiUrl" class="save-inline-btn" :disabled="saving">
-                {{ saving ? '...' : 'Save' }}
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <!-- Account Info (only if logged in) -->
-        <section v-if="user" class="settings-section">
           <h3>Account</h3>
-          <div class="account-info">
+          <div v-if="loading" class="loading">Loading...</div>
+          <div v-else-if="user" class="account-info">
             <div class="info-row">
               <span class="label">Email</span>
               <span class="value">{{ user.email }}</span>
@@ -145,10 +111,10 @@ function handleLogout() {
           </div>
         </section>
 
-        <!-- Auth Token (only if logged in) -->
-        <section v-if="token" class="settings-section">
+        <!-- Auth Token -->
+        <section class="settings-section">
           <h3>Auth Token</h3>
-          <p class="hint">Use this token for the KDE widget or other clients.</p>
+          <p class="section-description">Use this token to authenticate the KDE widget or other clients.</p>
           <div class="token-container">
             <input 
               :type="showToken ? 'text' : 'password'" 
@@ -165,11 +131,11 @@ function handleLogout() {
           </div>
         </section>
 
-        <!-- Change Password (only if logged in) -->
-        <section v-if="user" class="settings-section">
+        <!-- Change Password -->
+        <section class="settings-section">
           <h3>Change Password</h3>
           <form @submit.prevent="handleChangePassword" class="password-form">
-            <div class="field">
+            <div class="form-group">
               <label>Current Password</label>
               <input 
                 v-model="currentPassword" 
@@ -177,7 +143,7 @@ function handleLogout() {
                 placeholder="Enter current password"
               />
             </div>
-            <div class="field">
+            <div class="form-group">
               <label>New Password</label>
               <input 
                 v-model="newPassword" 
@@ -185,7 +151,7 @@ function handleLogout() {
                 placeholder="Enter new password"
               />
             </div>
-            <div class="field">
+            <div class="form-group">
               <label>Confirm New Password</label>
               <input 
                 v-model="confirmPassword" 
@@ -203,8 +169,8 @@ function handleLogout() {
         <p v-if="error" class="error">{{ error }}</p>
         <p v-if="success" class="success">{{ success }}</p>
 
-        <!-- Logout (only if logged in) -->
-        <section v-if="user" class="settings-section logout-section">
+        <!-- Logout -->
+        <section class="settings-section logout-section">
           <button @click="handleLogout" class="logout-btn">Logout</button>
         </section>
       </div>
@@ -213,39 +179,37 @@ function handleLogout() {
 </template>
 
 <style scoped>
-.overlay {
+.settings-overlay {
   position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
   z-index: 100;
 }
 
-.modal {
+.settings-modal {
   background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 16px;
-  width: 100%;
-  max-width: 400px;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 480px;
   max-height: 90vh;
   overflow-y: auto;
 }
 
-.modal-header {
+.settings-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 1.25rem 1.5rem;
   border-bottom: 1px solid var(--border-color);
-  position: sticky;
-  top: 0;
-  background: var(--bg-primary);
 }
 
-.modal-header h2 {
+.settings-header h2 {
   font-size: 1.25rem;
   font-weight: 600;
   color: var(--text-primary);
@@ -256,11 +220,16 @@ function handleLogout() {
   border: none;
   font-size: 1.5rem;
   color: var(--text-muted);
+  cursor: pointer;
   padding: 0;
   line-height: 1;
 }
 
-.modal-content {
+.close-btn:hover {
+  color: var(--text-primary);
+}
+
+.settings-content {
   padding: 1.5rem;
 }
 
@@ -277,7 +246,7 @@ function handleLogout() {
 }
 
 .settings-section h3 {
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -285,61 +254,8 @@ function handleLogout() {
   margin-bottom: 0.75rem;
 }
 
-.field {
-  margin-bottom: 0.75rem;
-}
-
-.field:last-child {
-  margin-bottom: 0;
-}
-
-.field label {
-  display: block;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  margin-bottom: 0.25rem;
-}
-
-.field input {
-  width: 100%;
-  padding: 0.625rem;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  color: var(--text-primary);
+.section-description {
   font-size: 0.875rem;
-}
-
-.field input:focus {
-  outline: none;
-  border-color: var(--accent-color);
-}
-
-.input-row {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.input-row input {
-  flex: 1;
-}
-
-.save-inline-btn {
-  padding: 0.625rem 1rem;
-  background: var(--accent-color);
-  border: none;
-  border-radius: 6px;
-  color: #fff;
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
-.save-inline-btn:disabled {
-  opacity: 0.6;
-}
-
-.hint {
-  font-size: 0.75rem;
   color: var(--text-muted);
   margin-bottom: 0.75rem;
 }
@@ -364,35 +280,39 @@ function handleLogout() {
 .info-row .value {
   color: var(--text-primary);
   font-weight: 500;
-  font-size: 0.875rem;
 }
 
 .token-container {
   display: flex;
   gap: 0.5rem;
-  flex-wrap: wrap;
 }
 
 .token-input {
   flex: 1;
-  min-width: 120px;
   padding: 0.625rem;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
   color: var(--text-primary);
-  font-size: 0.625rem;
+  font-size: 0.75rem;
   font-family: monospace;
 }
 
 .token-btn {
-  padding: 0.625rem 0.75rem;
+  padding: 0.625rem 0.875rem;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.token-btn:hover {
+  border-color: var(--border-light);
+  color: var(--text-primary);
 }
 
 .token-btn.primary {
@@ -401,10 +321,39 @@ function handleLogout() {
   color: #fff;
 }
 
+.token-btn.primary:hover {
+  background: var(--accent-hover);
+}
+
 .password-form {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.form-group label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.form-group input {
+  padding: 0.625rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: var(--accent-color);
 }
 
 .submit-btn {
@@ -415,11 +364,17 @@ function handleLogout() {
   color: #fff;
   font-size: 0.875rem;
   font-weight: 500;
-  margin-top: 0.25rem;
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+
+.submit-btn:hover {
+  background: var(--accent-hover);
 }
 
 .submit-btn:disabled {
   opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .error {
@@ -449,10 +404,16 @@ function handleLogout() {
   color: var(--danger-color);
   font-size: 0.875rem;
   font-weight: 500;
+  cursor: pointer;
 }
 
-.logout-btn:active {
+.logout-btn:hover {
   background: var(--danger-color);
   color: #fff;
+}
+
+.loading {
+  color: var(--text-muted);
+  font-size: 0.875rem;
 }
 </style>
