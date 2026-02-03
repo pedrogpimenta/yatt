@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { api } from '../api.js'
 import { preferences } from '../preferences.js'
+import * as offlineStorage from '../offlineStorage.js'
 import DeviceSync from './DeviceSync.vue'
 
 const emit = defineEmits(['close', 'logout'])
@@ -58,9 +59,10 @@ async function fetchUser() {
 function handleSynced() {
   showSyncModal.value = false
   success.value = 'Devices synced successfully!'
+  // Reload to show the new timers
   setTimeout(() => {
-    success.value = ''
-  }, 3000)
+    window.location.reload()
+  }, 500)
 }
 
 async function handleChangePassword() {
@@ -106,6 +108,63 @@ async function copyToken() {
     }, 2000)
   } catch (err) {
     error.value = 'Failed to copy token'
+  }
+}
+
+// CSV Export
+function formatDurationForCSV(ms) {
+  if (!ms || ms < 0) return ''
+  const hours = Math.floor(ms / 3600000)
+  const minutes = Math.floor((ms % 3600000) / 60000)
+  const seconds = Math.floor((ms % 60000) / 1000)
+  return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
+function escapeCSV(value) {
+  if (value === null || value === undefined) return ''
+  const str = String(value)
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`
+  }
+  return str
+}
+
+async function downloadCSV() {
+  try {
+    const timers = await offlineStorage.getAllTimers()
+    
+    const headers = ['ID', 'Tag', 'Start Time', 'End Time', 'Duration']
+    const rows = [headers.join(',')]
+    
+    timers.sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
+    
+    for (const timer of timers) {
+      const start = new Date(timer.start_time)
+      const end = timer.end_time ? new Date(timer.end_time) : null
+      const duration = end ? end.getTime() - start.getTime() : null
+      
+      const row = [
+        escapeCSV(timer.id),
+        escapeCSV(timer.tag || ''),
+        escapeCSV(timer.start_time),
+        escapeCSV(timer.end_time || ''),
+        escapeCSV(formatDurationForCSV(duration))
+      ]
+      rows.push(row.join(','))
+    }
+    
+    const csv = rows.join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `yatt-export-${new Date().toISOString().split('T')[0]}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    error.value = 'Failed to export CSV: ' + err.message
   }
 }
 
@@ -162,6 +221,17 @@ onUnmounted(() => {
               <option value="12h">12-hour (2:30 PM)</option>
             </select>
           </div>
+          <div class="preference-row">
+            <span class="label">Day Starts At</span>
+            <select v-model.number="preferences.dayStartHour" class="preference-select">
+              <option v-for="hour in 24" :key="hour - 1" :value="hour - 1">
+                {{ String(hour - 1).padStart(2, '0') }}:00{{ hour - 1 === 0 ? ' (midnight)' : '' }}
+              </option>
+            </select>
+          </div>
+          <p class="preference-hint">
+            Set when your "day" starts for time tracking. Useful if you often work past midnight.
+          </p>
         </section>
 
         <!-- Local Mode Info & Sync -->
@@ -172,6 +242,17 @@ onUnmounted(() => {
           </p>
           <button @click="showSyncModal = true" class="sync-btn">
             Sync with another device
+          </button>
+        </section>
+
+        <!-- Export Data -->
+        <section class="settings-section">
+          <h3>Export Data</h3>
+          <p class="section-description">
+            Download your timer data as a CSV file for use in spreadsheets.
+          </p>
+          <button @click="downloadCSV" class="export-btn">
+            Download CSV
           </button>
         </section>
 
@@ -421,6 +502,13 @@ onUnmounted(() => {
   border-color: var(--accent-color);
 }
 
+.preference-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.75rem;
+  line-height: 1.4;
+}
+
 .token-container {
   display: flex;
   gap: 0.5rem;
@@ -571,6 +659,24 @@ onUnmounted(() => {
 
 .sync-btn:hover {
   background: var(--accent-hover);
+}
+
+.export-btn {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+
+.export-btn:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border-light);
 }
 
 /* Confirmation Modal */

@@ -1,10 +1,12 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { api } from '../api.js'
+import * as offlineStorage from '../offlineStorage.js'
 
 const emit = defineEmits(['close', 'synced'])
 
-const mode = ref('choose') // 'choose', 'share', 'scan'
+const syncType = ref('online') // 'online', 'offline'
+const mode = ref('choose') // 'choose', 'share', 'scan', 'export', 'import'
 const syncCode = ref('')
 const manualCode = ref('')
 const qrCanvas = ref(null)
@@ -14,12 +16,89 @@ const loading = ref(false)
 const polling = ref(false)
 let pollInterval = null
 
+// Offline sync
+const exportData = ref('')
+const importData = ref('')
+const copied = ref(false)
+
 // QR Code generation using Canvas API (no external library needed)
 function generateQRCode(text) {
   // We'll use a simple URL-based QR code service as a fallback,
   // or generate using a minimal QR library
   // For simplicity, we'll display the code prominently and use a QR API
   return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(text)}`
+}
+
+// Offline export/import functions
+async function generateExport() {
+  mode.value = 'export'
+  loading.value = true
+  error.value = ''
+  
+  try {
+    const timers = await offlineStorage.getAllTimers()
+    const data = JSON.stringify(timers)
+    exportData.value = btoa(unescape(encodeURIComponent(data)))
+  } catch (err) {
+    error.value = 'Failed to export data: ' + err.message
+    mode.value = 'choose'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function copyExportData() {
+  try {
+    await navigator.clipboard.writeText(exportData.value)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  } catch (err) {
+    error.value = 'Failed to copy to clipboard'
+  }
+}
+
+async function handleImport() {
+  const data = importData.value.trim()
+  if (!data) {
+    error.value = 'Please paste the export data'
+    return
+  }
+  
+  loading.value = true
+  error.value = ''
+  
+  try {
+    const json = decodeURIComponent(escape(atob(data)))
+    const timers = JSON.parse(json)
+    
+    if (!Array.isArray(timers)) {
+      throw new Error('Invalid data format')
+    }
+    
+    await api.completeSyncImport(timers)
+    success.value = `Imported ${timers.length} timer(s) successfully!`
+    setTimeout(() => {
+      emit('synced')
+    }, 1500)
+  } catch (err) {
+    if (err.message.includes('Invalid') || err.message.includes('JSON')) {
+      error.value = 'Invalid export data. Please check and try again.'
+    } else {
+      error.value = 'Failed to import: ' + err.message
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+function resetMode() {
+  mode.value = 'choose'
+  error.value = ''
+  success.value = ''
+  exportData.value = ''
+  importData.value = ''
+  copied.value = false
+  stopPolling()
 }
 
 async function startSharing() {
@@ -123,11 +202,27 @@ onUnmounted(() => {
       </div>
 
       <div class="sync-content">
-        <!-- Choose Mode -->
-        <div v-if="mode === 'choose'" class="mode-choose">
+        <!-- Sync Type Toggle -->
+        <div v-if="mode === 'choose'" class="sync-type-toggle">
+          <button 
+            :class="['toggle-btn', { active: syncType === 'online' }]"
+            @click="syncType = 'online'"
+          >
+            Online Sync
+          </button>
+          <button 
+            :class="['toggle-btn', { active: syncType === 'offline' }]"
+            @click="syncType = 'offline'"
+          >
+            Offline Export
+          </button>
+        </div>
+
+        <!-- Choose Mode - Online -->
+        <div v-if="mode === 'choose' && syncType === 'online'" class="mode-choose">
           <p class="description">
             Sync your timers between devices without creating an account. 
-            Data is transferred securely through the server.
+            Data is transferred through the server.
           </p>
 
           <div class="mode-buttons">
@@ -144,6 +239,31 @@ onUnmounted(() => {
               <span class="text">
                 <strong>Receive on this device</strong>
                 <small>Enter code from another device</small>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Choose Mode - Offline -->
+        <div v-if="mode === 'choose' && syncType === 'offline'" class="mode-choose">
+          <p class="description">
+            Export or import your timers as text. 100% private - data never touches the server.
+          </p>
+
+          <div class="mode-buttons">
+            <button @click="generateExport" class="mode-btn share-btn">
+              <span class="icon">📋</span>
+              <span class="text">
+                <strong>Export data</strong>
+                <small>Copy data to share manually</small>
+              </span>
+            </button>
+
+            <button @click="mode = 'import'" class="mode-btn scan-btn">
+              <span class="icon">📥</span>
+              <span class="text">
+                <strong>Import data</strong>
+                <small>Paste data from another device</small>
               </span>
             </button>
           </div>
@@ -182,7 +302,7 @@ onUnmounted(() => {
             {{ success }}
           </div>
 
-          <button v-if="!success" @click="mode = 'choose'; stopPolling()" class="back-btn">
+          <button v-if="!success" @click="resetMode" class="back-btn">
             Cancel
           </button>
         </div>
@@ -217,7 +337,69 @@ onUnmounted(() => {
             {{ success }}
           </div>
 
-          <button v-if="!success" @click="mode = 'choose'" class="back-btn">
+          <button v-if="!success" @click="resetMode" class="back-btn">
+            Back
+          </button>
+        </div>
+
+        <!-- Export Mode (Offline) -->
+        <div v-else-if="mode === 'export'" class="mode-export">
+          <div v-if="loading" class="loading">
+            Generating export...
+          </div>
+
+          <template v-else-if="exportData && !success">
+            <p class="description">
+              Copy this text and send it to the other device (via email, messenger, etc.):
+            </p>
+
+            <div class="export-container">
+              <textarea 
+                :value="exportData" 
+                readonly 
+                class="export-textarea"
+                @click="$event.target.select()"
+              ></textarea>
+            </div>
+
+            <button @click="copyExportData" class="join-btn">
+              {{ copied ? 'Copied!' : 'Copy to Clipboard' }}
+            </button>
+          </template>
+
+          <button v-if="!success" @click="resetMode" class="back-btn">
+            Back
+          </button>
+        </div>
+
+        <!-- Import Mode (Offline) -->
+        <div v-else-if="mode === 'import'" class="mode-import">
+          <p class="description">
+            Paste the export data from the other device:
+          </p>
+
+          <div class="export-container">
+            <textarea 
+              v-model="importData" 
+              class="export-textarea"
+              placeholder="Paste export data here..."
+              :disabled="loading"
+            ></textarea>
+          </div>
+
+          <button 
+            @click="handleImport" 
+            class="join-btn"
+            :disabled="loading || !importData.trim()"
+          >
+            {{ loading ? 'Importing...' : 'Import Data' }}
+          </button>
+
+          <div v-if="success" class="success-message">
+            {{ success }}
+          </div>
+
+          <button v-if="!success" @click="resetMode" class="back-btn">
             Back
           </button>
         </div>
@@ -478,5 +660,68 @@ onUnmounted(() => {
   background: var(--bg-secondary);
   border-radius: 8px;
   margin-bottom: 1rem;
+}
+
+.sync-type-toggle {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+  background: var(--bg-secondary);
+  padding: 0.25rem;
+  border-radius: 8px;
+}
+
+.toggle-btn {
+  flex: 1;
+  padding: 0.625rem 1rem;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toggle-btn:hover {
+  color: var(--text-primary);
+}
+
+.toggle-btn.active {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.export-container {
+  margin-bottom: 1rem;
+}
+
+.export-textarea {
+  width: 100%;
+  height: 120px;
+  padding: 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: monospace;
+  font-size: 0.75rem;
+  resize: vertical;
+  word-break: break-all;
+}
+
+.export-textarea:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.export-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.export-textarea[readonly] {
+  cursor: pointer;
 }
 </style>

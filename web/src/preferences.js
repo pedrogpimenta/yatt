@@ -4,7 +4,8 @@ const STORAGE_KEY = 'yatt_preferences'
 
 const defaults = {
   dateFormat: 'dd/mm/yyyy', // 'dd/mm/yyyy' or 'mm/dd/yyyy'
-  timeFormat: '24h'         // '24h' or '12h'
+  timeFormat: '24h',        // '24h' or '12h'
+  dayStartHour: 0           // 0-23, hour when a new "day" starts for time tracking
 }
 
 function loadPreferences() {
@@ -33,6 +34,59 @@ export const preferences = reactive(loadPreferences())
 watch(preferences, (newPrefs) => {
   savePreferences(newPrefs)
 }, { deep: true })
+
+// Day boundary helpers for time tracking
+// If dayStartHour is 4 and time is 02:00, effective date is "yesterday"
+
+export function getEffectiveDate(date) {
+  if (typeof date === 'string') {
+    date = new Date(date)
+  }
+  
+  const dayStartHour = preferences.dayStartHour || 0
+  
+  // If before the day start hour, treat as previous day
+  if (date.getHours() < dayStartHour) {
+    const adjusted = new Date(date)
+    adjusted.setDate(adjusted.getDate() - 1)
+    return adjusted
+  }
+  
+  return new Date(date)
+}
+
+export function getEffectiveDateString(date) {
+  return getEffectiveDate(date).toDateString()
+}
+
+// Get the start of "today" considering dayStartHour
+export function getEffectiveTodayStart() {
+  const now = new Date()
+  const dayStartHour = preferences.dayStartHour || 0
+  
+  const todayStart = new Date(now)
+  
+  // If we're before the day start hour, "today" started yesterday at dayStartHour
+  if (now.getHours() < dayStartHour) {
+    todayStart.setDate(todayStart.getDate() - 1)
+  }
+  
+  todayStart.setHours(dayStartHour, 0, 0, 0)
+  return todayStart
+}
+
+// Get the start of "this week" (Monday) considering dayStartHour
+export function getEffectiveWeekStart() {
+  const effectiveToday = getEffectiveDate(new Date())
+  const day = effectiveToday.getDay()
+  const mondayOffset = day === 0 ? -6 : 1 - day
+  
+  const monday = new Date(effectiveToday)
+  monday.setDate(effectiveToday.getDate() + mondayOffset)
+  monday.setHours(preferences.dayStartHour || 0, 0, 0, 0)
+  
+  return monday
+}
 
 // Formatting functions that use preferences
 
@@ -74,14 +128,15 @@ export function formatDateLabel(date) {
     date = new Date(date)
   }
   
-  const today = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
+  // Use effective dates for comparison
+  const effectiveToday = getEffectiveDate(new Date())
+  const effectiveYesterday = new Date(effectiveToday)
+  effectiveYesterday.setDate(effectiveYesterday.getDate() - 1)
   
-  if (date.toDateString() === today.toDateString()) {
+  if (date.toDateString() === effectiveToday.toDateString()) {
     return 'Today'
   }
-  if (date.toDateString() === yesterday.toDateString()) {
+  if (date.toDateString() === effectiveYesterday.toDateString()) {
     return 'Yesterday'
   }
   

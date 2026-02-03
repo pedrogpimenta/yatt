@@ -9,7 +9,11 @@ import {
   parseTimeInput,
   parseDateInput,
   getTimePlaceholder,
-  getDatePlaceholder
+  getDatePlaceholder,
+  getEffectiveDate,
+  getEffectiveDateString,
+  getEffectiveTodayStart,
+  getEffectiveWeekStart
 } from '../preferences.js'
 import TimerItem from './TimerItem.vue'
 import WeeklyCalendar from './WeeklyCalendar.vue'
@@ -396,46 +400,52 @@ async function syncPendingChanges() {
 }
 
 const todayTotal = computed(() => {
-  const elapsed = currentElapsed.value
+  // Track dependencies for reactivity
+  const _ = preferences.dayStartHour
+  const __ = currentElapsed.value // Triggers recalc for running timers
   
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const tomorrow = new Date(today)
-  tomorrow.setDate(tomorrow.getDate() + 1)
+  const todayStart = getEffectiveTodayStart()
+  const tomorrowStart = new Date(todayStart)
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1)
   
   let total = 0
+  const now = Date.now()
+  
   for (const timer of timers.value) {
-    const start = new Date(timer.start_time)
-    if (start >= today && start < tomorrow) {
-      if (timer.end_time) {
-        total += new Date(timer.end_time).getTime() - start.getTime()
-      } else {
-        total += elapsed
-      }
+    const timerStart = new Date(timer.start_time).getTime()
+    const timerEnd = timer.end_time ? new Date(timer.end_time).getTime() : now
+    
+    // Calculate overlap between timer and today's window
+    const overlapStart = Math.max(timerStart, todayStart.getTime())
+    const overlapEnd = Math.min(timerEnd, tomorrowStart.getTime())
+    
+    if (overlapEnd > overlapStart) {
+      total += overlapEnd - overlapStart
     }
   }
   return total
 })
 
 const weekTotal = computed(() => {
-  const elapsed = currentElapsed.value
+  // Track dependencies for reactivity
+  const _ = preferences.dayStartHour
+  const __ = currentElapsed.value // Triggers recalc for running timers
   
-  const now = new Date()
-  const day = now.getDay()
-  const mondayOffset = day === 0 ? -6 : 1 - day
-  const monday = new Date(now)
-  monday.setDate(now.getDate() + mondayOffset)
-  monday.setHours(0, 0, 0, 0)
+  const weekStart = getEffectiveWeekStart()
   
   let total = 0
+  const now = Date.now()
+  
   for (const timer of timers.value) {
-    const start = new Date(timer.start_time)
-    if (start >= monday) {
-      if (timer.end_time) {
-        total += new Date(timer.end_time).getTime() - start.getTime()
-      } else {
-        total += elapsed
-      }
+    const timerStart = new Date(timer.start_time).getTime()
+    const timerEnd = timer.end_time ? new Date(timer.end_time).getTime() : now
+    
+    // Calculate overlap between timer and this week's window
+    const overlapStart = Math.max(timerStart, weekStart.getTime())
+    const overlapEnd = timerEnd
+    
+    if (overlapEnd > overlapStart) {
+      total += overlapEnd - overlapStart
     }
   }
   return total
@@ -466,20 +476,22 @@ const filteredTotal = computed(() => {
 const timersByDay = computed(() => {
   // Reference preferences and currentElapsed to track as dependencies for reactivity
   const _ = preferences.dateFormat
-  const elapsed = currentElapsed.value
+  const dayStartHour = preferences.dayStartHour || 0
+  const __ = currentElapsed.value // Triggers recalc for running timers
+  const now = Date.now()
   
   const groups = []
   let currentDateStr = null
   
   for (const timer of filteredTimers.value) {
-    const date = new Date(timer.start_time)
-    const dateStr = date.toDateString()
+    const effectiveDate = getEffectiveDate(timer.start_time)
+    const dateStr = effectiveDate.toDateString()
     
     if (dateStr !== currentDateStr) {
       currentDateStr = dateStr
       groups.push({
-        date: date,
-        label: formatDateLabel(date),
+        date: effectiveDate,
+        label: formatDateLabel(effectiveDate),
         timers: [timer]
       })
     } else {
@@ -487,15 +499,25 @@ const timersByDay = computed(() => {
     }
   }
   
-  // Calculate total for each day
+  // Calculate total for each day using overlap with day boundaries
   for (const group of groups) {
+    // Calculate day boundaries for this group
+    const dayStart = new Date(group.date)
+    dayStart.setHours(dayStartHour, 0, 0, 0)
+    const dayEnd = new Date(dayStart)
+    dayEnd.setDate(dayEnd.getDate() + 1)
+    
     let dayTotal = 0
     for (const timer of group.timers) {
-      const start = new Date(timer.start_time).getTime()
-      if (timer.end_time) {
-        dayTotal += new Date(timer.end_time).getTime() - start
-      } else {
-        dayTotal += elapsed
+      const timerStart = new Date(timer.start_time).getTime()
+      const timerEnd = timer.end_time ? new Date(timer.end_time).getTime() : now
+      
+      // Calculate overlap between timer and this day's window
+      const overlapStart = Math.max(timerStart, dayStart.getTime())
+      const overlapEnd = Math.min(timerEnd, dayEnd.getTime())
+      
+      if (overlapEnd > overlapStart) {
+        dayTotal += overlapEnd - overlapStart
       }
     }
     group.total = dayTotal
