@@ -7,7 +7,14 @@ import org.kde.plasma.core as PlasmaCore
 PlasmoidItem {
     id: root
 
-    property string apiUrl: Plasmoid.configuration.apiUrl || "http://localhost:3000"
+    property string apiUrl: {
+        var url = Plasmoid.configuration.apiUrl || "http://localhost:3000"
+        // Remove trailing slash to avoid double slashes in API calls
+        while (url.endsWith("/")) {
+            url = url.slice(0, -1)
+        }
+        return url
+    }
     property string token: Plasmoid.configuration.token || ""
     
     property var currentTimer: null
@@ -24,6 +31,7 @@ PlasmoidItem {
     
     property var availableTags: []
     property string newTag: ""
+    property string lastApiError: ""
 
     // WebSocket for real-time updates
     WebSocket {
@@ -180,22 +188,43 @@ PlasmoidItem {
 
     function apiRequest(endpoint, method, body, callback) {
         if (!token) {
-            console.log("No token configured")
+            console.log("YATT: No token configured")
             return
         }
 
+        var fullUrl = apiUrl + endpoint
+        console.log("YATT: API request:", method, fullUrl)
+
         var xhr = new XMLHttpRequest()
-        xhr.open(method, apiUrl + endpoint)
+        
+        xhr.onerror = function() {
+            console.log("YATT: Network error for", fullUrl, "- Check if the server is reachable and HTTPS certificate is valid")
+            lastApiError = "Network error - check server/SSL"
+        }
+        
+        xhr.ontimeout = function() {
+            console.log("YATT: Request timeout for", fullUrl)
+            lastApiError = "Request timeout"
+        }
+        
+        xhr.open(method, fullUrl)
+        xhr.timeout = 10000  // 10 second timeout
         xhr.setRequestHeader("Content-Type", "application/json")
         xhr.setRequestHeader("Authorization", "Bearer " + token)
         
         xhr.onreadystatechange = function() {
             if (xhr.readyState === XMLHttpRequest.DONE) {
+                console.log("YATT: Response status:", xhr.status, "for", fullUrl)
                 if (xhr.status >= 200 && xhr.status < 300) {
+                    lastApiError = ""  // Clear error on success
                     var data = xhr.responseText ? JSON.parse(xhr.responseText) : null
                     if (callback) callback(data)
+                } else if (xhr.status === 0) {
+                    console.log("YATT: Request failed (status 0) - likely SSL/network issue for", fullUrl)
+                    lastApiError = "Connection failed - check URL and SSL"
                 } else {
-                    console.log("API Error:", xhr.status, xhr.responseText)
+                    console.log("YATT: API Error:", xhr.status, xhr.responseText)
+                    lastApiError = "Error " + xhr.status
                 }
             }
         }

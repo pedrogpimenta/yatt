@@ -1,8 +1,16 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '../api.js'
+import { preferences } from '../preferences.js'
 
 const emit = defineEmits(['close', 'logout'])
+
+function handleKeydown(e) {
+  if (e.key === 'Escape') {
+    e.stopPropagation()
+    emit('close')
+  }
+}
 
 const user = ref(null)
 const loading = ref(true)
@@ -83,6 +91,11 @@ function handleLogout() {
 
 onMounted(() => {
   fetchUser()
+  window.addEventListener('keydown', handleKeydown, true)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown, true)
 })
 </script>
 
@@ -95,6 +108,25 @@ onMounted(() => {
       </div>
       
       <div class="settings-content">
+        <!-- Display Preferences -->
+        <section class="settings-section">
+          <h3>Display</h3>
+          <div class="preference-row">
+            <span class="label">Date Format</span>
+            <select v-model="preferences.dateFormat" class="preference-select">
+              <option value="dd/mm/yyyy">DD/MM/YYYY</option>
+              <option value="mm/dd/yyyy">MM/DD/YYYY</option>
+            </select>
+          </div>
+          <div class="preference-row">
+            <span class="label">Time Format</span>
+            <select v-model="preferences.timeFormat" class="preference-select">
+              <option value="24h">24-hour (14:30)</option>
+              <option value="12h">12-hour (2:30 PM)</option>
+            </select>
+          </div>
+        </section>
+
         <!-- Account Info -->
         <section class="settings-section">
           <h3>Account</h3>
@@ -280,6 +312,37 @@ onMounted(() => {
 .info-row .value {
   color: var(--text-primary);
   font-weight: 500;
+}
+
+.preference-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.preference-row:last-child {
+  margin-bottom: 0;
+}
+
+.preference-row .label {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.preference-select {
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.preference-select:focus {
+  outline: none;
+  border-color: var(--accent-color);
 }
 
 .token-container {

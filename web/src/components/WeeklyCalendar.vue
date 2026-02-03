@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { preferences, formatTime, formatDate } from '../preferences.js'
 
 const props = defineProps({
   timers: Array,
@@ -47,6 +48,12 @@ const hours = computed(() => {
   return result
 })
 
+const formattedHours = computed(() => {
+  // Reference preferences for reactivity
+  const _ = preferences.timeFormat
+  return hours.value.map(hour => formatHour(hour))
+})
+
 // Filter timers for the current week
 const weekTimers = computed(() => {
   return props.timers.filter(timer => {
@@ -91,16 +98,21 @@ function getTimersForDay(dayDate) {
   })
 }
 
-function formatDate(date) {
+function formatDayNumber(date) {
   return date.getDate()
 }
 
 function formatHour(hour) {
+  if (preferences.timeFormat === '12h') {
+    const period = hour >= 12 ? 'PM' : 'AM'
+    const hour12 = hour % 12 || 12
+    return `${hour12} ${period}`
+  }
   return `${String(hour).padStart(2, '0')}:00`
 }
 
-function formatTime(date) {
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+function formatTimeDisplay(date) {
+  return formatTime(date)
 }
 
 function isToday(date) {
@@ -125,18 +137,14 @@ function selectTimer(timer) {
 }
 
 const weekLabel = computed(() => {
+  // Reference preferences to track as dependency for reactivity
+  const _ = preferences.dateFormat
+  
   const start = weekStart.value
   const end = new Date(weekStart.value)
   end.setDate(end.getDate() + 6)
   
-  const startMonth = start.toLocaleDateString([], { month: 'short' })
-  const endMonth = end.toLocaleDateString([], { month: 'short' })
-  const year = start.getFullYear()
-  
-  if (startMonth === endMonth) {
-    return `${startMonth} ${start.getDate()} - ${end.getDate()}, ${year}`
-  }
-  return `${startMonth} ${start.getDate()} - ${endMonth} ${end.getDate()}, ${year}`
+  return `${formatDate(start)} - ${formatDate(end)}`
 })
 </script>
 
@@ -163,7 +171,7 @@ const weekLabel = computed(() => {
             :class="{ today: isToday(day) }"
           >
             <span class="day-name">{{ dayNames[index] }}</span>
-            <span class="day-date" :class="{ 'is-today': isToday(day) }">{{ formatDate(day) }}</span>
+            <span class="day-date" :class="{ 'is-today': isToday(day) }">{{ formatDayNumber(day) }}</span>
           </div>
         </div>
       </div>
@@ -173,8 +181,8 @@ const weekLabel = computed(() => {
         <div class="calendar-grid">
           <!-- Time column -->
           <div class="time-column">
-            <div v-for="hour in hours" :key="hour" class="hour-label">
-              {{ formatHour(hour) }}
+            <div v-for="(label, index) in formattedHours" :key="index" class="hour-label">
+              {{ label }}
             </div>
           </div>
           
@@ -201,7 +209,7 @@ const weekLabel = computed(() => {
                   :class="{ running: timer.isRunning }"
                   :style="{ top: timer.top, height: timer.height }"
                   @click="selectTimer(timer)"
-                  :title="`${timer.tag || 'No tag'}\n${formatTime(timer.displayStart)} - ${timer.isRunning ? 'Running' : formatTime(timer.displayEnd)}`"
+                  :title="`${timer.tag || 'No tag'}\n${formatTimeDisplay(timer.displayStart)} - ${timer.isRunning ? 'Running' : formatTimeDisplay(timer.displayEnd)}`"
                 >
                   <span class="timer-tag">{{ timer.tag || 'No tag' }}</span>
                 </div>

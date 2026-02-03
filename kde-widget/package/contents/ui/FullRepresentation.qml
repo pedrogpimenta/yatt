@@ -391,6 +391,18 @@ PlasmaExtras.Representation {
             wrapMode: Text.WordWrap
         }
 
+        // Connection error warning
+        PlasmaExtras.Heading {
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignHCenter
+            visible: root.token && root.lastApiError !== ""
+            level: 4
+            text: root.lastApiError
+            color: Kirigami.Theme.negativeTextColor
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+        }
+
         Item { Layout.fillHeight: true }
     }
 }

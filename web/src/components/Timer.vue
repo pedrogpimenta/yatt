@@ -1,6 +1,16 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { api } from '../api.js'
+import { 
+  preferences, 
+  formatDateLabel,
+  formatTimeForInput,
+  formatDateForInput,
+  parseTimeInput,
+  parseDateInput,
+  getTimePlaceholder,
+  getDatePlaceholder
+} from '../preferences.js'
 import TimerItem from './TimerItem.vue'
 import WeeklyCalendar from './WeeklyCalendar.vue'
 import TagInput from './TagInput.vue'
@@ -15,6 +25,202 @@ const tags = ref([])
 const viewMode = ref('calendar') // 'list' or 'calendar'
 const selectedTimer = ref(null)
 const filterTag = ref('') // '' means all tags
+
+// Modal stack to track open modals (for Escape key handling)
+const modalStack = ref([])
+
+function pushModal(name) {
+  modalStack.value.push(name)
+}
+
+function popModal(name) {
+  const index = modalStack.value.lastIndexOf(name)
+  if (index !== -1) {
+    modalStack.value.splice(index, 1)
+  }
+}
+
+function closeTopModal() {
+  if (modalStack.value.length === 0) return
+  
+  const topModal = modalStack.value[modalStack.value.length - 1]
+  
+  if (topModal === 'manualEntry') {
+    closeManualEntry()
+  } else if (topModal === 'selectedTimer') {
+    closeSelectedTimer()
+  }
+}
+
+function handleKeydown(e) {
+  if (e.key === 'Escape') {
+    closeTopModal()
+  }
+}
+
+// Manual entry modal
+const showManualEntry = ref(false)
+const manualEntry = ref({
+  startDate: '',
+  startTime: '',
+  endDate: '',
+  endTime: '',
+  tag: ''
+})
+const manualEndDateSynced = ref(true)
+const manualStartDatePicker = ref(null)
+const manualEndDatePicker = ref(null)
+const hiddenManualStartDate = ref('')
+const hiddenManualEndDate = ref('')
+
+function toISODateString(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function getDefaultTime(hours) {
+  // Create a date with the specified hour to format it according to preferences
+  const date = new Date()
+  date.setHours(hours, 0, 0, 0)
+  return formatTimeForInput(date)
+}
+
+function openManualEntry() {
+  // Default to today's date
+  const today = new Date()
+  const isoDate = toISODateString(today)
+  const formattedDate = formatDateForInput(today)
+  manualEntry.value = {
+    startDate: formattedDate,
+    startTime: getDefaultTime(9),
+    endDate: formattedDate,
+    endTime: getDefaultTime(10),
+    tag: ''
+  }
+  hiddenManualStartDate.value = isoDate
+  hiddenManualEndDate.value = isoDate
+  manualEndDateSynced.value = true
+  error.value = ''
+  showManualEntry.value = true
+  pushModal('manualEntry')
+}
+
+function closeManualEntry() {
+  showManualEntry.value = false
+  popModal('manualEntry')
+}
+
+function openManualStartDatePicker() {
+  manualStartDatePicker.value?.showPicker()
+}
+
+function openManualEndDatePicker() {
+  manualEndDatePicker.value?.showPicker()
+}
+
+function onHiddenManualStartDateChange() {
+  if (hiddenManualStartDate.value) {
+    const [year, month, day] = hiddenManualStartDate.value.split('-').map(Number)
+    const date = new Date(year, month - 1, day)
+    manualEntry.value.startDate = formatDateForInput(date)
+    if (manualEndDateSynced.value) {
+      hiddenManualEndDate.value = hiddenManualStartDate.value
+      manualEntry.value.endDate = manualEntry.value.startDate
+    }
+  }
+}
+
+function onHiddenManualEndDateChange() {
+  if (hiddenManualEndDate.value) {
+    const [year, month, day] = hiddenManualEndDate.value.split('-').map(Number)
+    const date = new Date(year, month - 1, day)
+    manualEntry.value.endDate = formatDateForInput(date)
+    manualEndDateSynced.value = hiddenManualEndDate.value === hiddenManualStartDate.value
+  }
+}
+
+function onManualStartDateInput() {
+  const parsed = parseDateInput(manualEntry.value.startDate)
+  if (parsed) {
+    hiddenManualStartDate.value = `${parsed.year}-${String(parsed.month + 1).padStart(2, '0')}-${String(parsed.day).padStart(2, '0')}`
+    if (manualEndDateSynced.value) {
+      hiddenManualEndDate.value = hiddenManualStartDate.value
+      manualEntry.value.endDate = manualEntry.value.startDate
+    }
+  }
+}
+
+function onManualEndDateInput() {
+  const parsed = parseDateInput(manualEntry.value.endDate)
+  if (parsed) {
+    hiddenManualEndDate.value = `${parsed.year}-${String(parsed.month + 1).padStart(2, '0')}-${String(parsed.day).padStart(2, '0')}`
+    manualEndDateSynced.value = hiddenManualEndDate.value === hiddenManualStartDate.value
+  }
+}
+
+async function saveManualEntry() {
+  error.value = ''
+  
+  const { startDate, startTime, endDate, endTime, tag } = manualEntry.value
+  
+  if (!startDate || !startTime || !endDate || !endTime) {
+    error.value = 'Please fill in all required fields'
+    return
+  }
+  
+  const startDateParts = parseDateInput(startDate)
+  if (!startDateParts) {
+    error.value = `Invalid start date. Use ${getDatePlaceholder()}`
+    return
+  }
+  
+  const startTimeParts = parseTimeInput(startTime)
+  if (!startTimeParts) {
+    error.value = `Invalid start time. Use ${getTimePlaceholder()}`
+    return
+  }
+  
+  const endDateParts = parseDateInput(endDate)
+  if (!endDateParts) {
+    error.value = `Invalid end date. Use ${getDatePlaceholder()}`
+    return
+  }
+  
+  const endTimeParts = parseTimeInput(endTime)
+  if (!endTimeParts) {
+    error.value = `Invalid end time. Use ${getTimePlaceholder()}`
+    return
+  }
+  
+  const startDateTime = new Date(startDateParts.year, startDateParts.month, startDateParts.day, startTimeParts.hours, startTimeParts.minutes)
+  const endDateTime = new Date(endDateParts.year, endDateParts.month, endDateParts.day, endTimeParts.hours, endTimeParts.minutes)
+  
+  if (endDateTime <= startDateTime) {
+    error.value = 'End time must be after start time'
+    return
+  }
+  
+  try {
+    await api.createTimer({
+      start_time: startDateTime.toISOString(),
+      end_time: endDateTime.toISOString(),
+      tag: tag || null
+    })
+    
+    // Refresh tags if it's a new one
+    if (tag && !tags.value.includes(tag)) {
+      fetchTags()
+    }
+    
+    await fetchTimers()
+    await updatePendingSyncCount()
+    closeManualEntry()
+  } catch (err) {
+    error.value = err.message
+  }
+}
 
 // Offline status
 const isOnline = ref(api.getOnlineStatus())
@@ -33,6 +239,56 @@ const currentElapsed = ref(0)
 const isEditingElapsed = ref(false)
 const editElapsedValue = ref('')
 const editStartedAt = ref(0)
+
+// Start time editing for running timer
+const editStartTime = ref('')
+const isEditingStartTime = ref(false)
+
+const displayStartTime = computed(() => {
+  if (!runningTimer.value) return ''
+  return formatTimeForInput(new Date(runningTimer.value.start_time))
+})
+
+function startEditStartTime() {
+  if (!runningTimer.value) return
+  editStartTime.value = displayStartTime.value
+  isEditingStartTime.value = true
+}
+
+function cancelEditStartTime() {
+  isEditingStartTime.value = false
+}
+
+async function saveEditStartTime() {
+  if (!runningTimer.value) return
+  
+  const timeParts = parseTimeInput(editStartTime.value)
+  if (!timeParts) {
+    error.value = `Invalid time format. Use ${getTimePlaceholder()}`
+    return
+  }
+  
+  const originalStart = new Date(runningTimer.value.start_time)
+  const newStart = new Date(originalStart)
+  newStart.setHours(timeParts.hours, timeParts.minutes, 0, 0)
+  
+  // Don't allow start time in the future
+  if (newStart > new Date()) {
+    error.value = 'Start time cannot be in the future'
+    return
+  }
+  
+  try {
+    await api.updateTimer(runningTimer.value.id, { start_time: newStart.toISOString() })
+    await fetchTimers()
+    isEditingStartTime.value = false
+    error.value = ''
+    await updatePendingSyncCount()
+  } catch (err) {
+    error.value = err.message
+  }
+}
+
 
 function updateCurrentElapsed() {
   if (runningTimer.value) {
@@ -144,11 +400,13 @@ const todayTotal = computed(() => {
   
   const today = new Date()
   today.setHours(0, 0, 0, 0)
+  const tomorrow = new Date(today)
+  tomorrow.setDate(tomorrow.getDate() + 1)
   
   let total = 0
   for (const timer of timers.value) {
     const start = new Date(timer.start_time)
-    if (start >= today) {
+    if (start >= today && start < tomorrow) {
       if (timer.end_time) {
         total += new Date(timer.end_time).getTime() - start.getTime()
       } else {
@@ -206,6 +464,10 @@ const filteredTotal = computed(() => {
 })
 
 const timersByDay = computed(() => {
+  // Reference preferences and currentElapsed to track as dependencies for reactivity
+  const _ = preferences.dateFormat
+  const elapsed = currentElapsed.value
+  
   const groups = []
   let currentDateStr = null
   
@@ -225,22 +487,23 @@ const timersByDay = computed(() => {
     }
   }
   
+  // Calculate total for each day
+  for (const group of groups) {
+    let dayTotal = 0
+    for (const timer of group.timers) {
+      const start = new Date(timer.start_time).getTime()
+      if (timer.end_time) {
+        dayTotal += new Date(timer.end_time).getTime() - start
+      } else {
+        dayTotal += elapsed
+      }
+    }
+    group.total = dayTotal
+  }
+  
   return groups
 })
 
-function formatDateLabel(date) {
-  const today = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
-  
-  if (date.toDateString() === today.toDateString()) {
-    return 'Today'
-  }
-  if (date.toDateString() === yesterday.toDateString()) {
-    return 'Yesterday'
-  }
-  return date.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
-}
 
 function formatDuration(ms) {
   return formatHHmmss(ms)
@@ -310,7 +573,7 @@ async function handleUpdate(id, data) {
   try {
     await api.updateTimer(id, data)
     await fetchTimers()
-    selectedTimer.value = null
+    closeSelectedTimer()
     await updatePendingSyncCount()
   } catch (err) {
     error.value = err.message
@@ -322,7 +585,7 @@ async function handleDelete(id) {
   try {
     await api.deleteTimer(id)
     await fetchTimers()
-    selectedTimer.value = null
+    closeSelectedTimer()
     await updatePendingSyncCount()
   } catch (err) {
     error.value = err.message
@@ -331,10 +594,12 @@ async function handleDelete(id) {
 
 function selectTimerFromCalendar(timer) {
   selectedTimer.value = timer
+  pushModal('selectedTimer')
 }
 
 function closeSelectedTimer() {
   selectedTimer.value = null
+  popModal('selectedTimer')
 }
 
 onMounted(() => {
@@ -347,6 +612,7 @@ onMounted(() => {
   
   api.addWsListener(onWsMessage)
   api.addOnlineListener(onOnlineStatusChange)
+  window.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
@@ -355,6 +621,7 @@ onUnmounted(() => {
   }
   api.removeWsListener(onWsMessage)
   api.removeOnlineListener(onOnlineStatusChange)
+  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
@@ -426,7 +693,23 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="current-tag" v-if="runningTimer?.tag">{{ runningTimer.tag }}</div>
-            <div class="current-status">{{ isRunning ? 'Running' : 'Stopped' }}</div>
+            <div class="current-status" v-if="!isRunning">Stopped</div>
+            <div class="started-at" v-if="isRunning && !isEditingStartTime" @click="startEditStartTime">
+              Started {{ displayStartTime }}
+            </div>
+            <div class="started-at-edit" v-if="isRunning && isEditingStartTime">
+              <span class="started-label">Started</span>
+              <input 
+                v-model="editStartTime" 
+                type="text" 
+                :placeholder="getTimePlaceholder()"
+                @keyup.enter="saveEditStartTime"
+                @keyup.escape="cancelEditStartTime"
+                autofocus
+              />
+              <button @click="cancelEditStartTime" class="btn-icon" title="Cancel">✕</button>
+              <button @click="saveEditStartTime" class="btn-icon btn-icon-primary" title="Save">✓</button>
+            </div>
           </div>
         </div>
 
@@ -454,6 +737,15 @@ onUnmounted(() => {
             <rect x="14" y="4" width="4" height="16"></rect>
           </svg>
           {{ isRunning ? 'Stop' : 'Start' }}
+        </button>
+
+        <!-- Add Manual Entry Button -->
+        <button @click="openManualEntry" class="manual-entry-button">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          Add Past Entry
         </button>
 
         <p v-if="error" class="error">{{ error }}</p>
@@ -509,6 +801,7 @@ onUnmounted(() => {
       <!-- Calendar View -->
       <div class="content-body" v-if="viewMode === 'calendar'">
         <WeeklyCalendar 
+          :key="`calendar-${preferences.dateFormat}-${preferences.timeFormat}`"
           :timers="timers" 
           :currentElapsed="currentElapsed"
           @select="selectTimerFromCalendar"
@@ -541,10 +834,13 @@ onUnmounted(() => {
         <p v-else-if="filteredTimers.length === 0" class="empty">{{ filterTag ? 'No timers with this tag' : 'No timers yet' }}</p>
         <div class="timer-list">
           <template v-for="group in timersByDay" :key="group.date.toISOString()">
-            <div class="day-separator">{{ group.label }}</div>
+            <div class="day-separator">
+              <span class="day-label">{{ group.label }}</span>
+              <span class="day-total">{{ formatDuration(group.total) }}</span>
+            </div>
             <TimerItem 
               v-for="timer in group.timers" 
-              :key="timer.id" 
+              :key="`${timer.id}-${preferences.dateFormat}-${preferences.timeFormat}`" 
               :timer="timer"
               @update="handleUpdate"
               @delete="handleDelete"
@@ -559,10 +855,97 @@ onUnmounted(() => {
       <div class="timer-modal">
         <button class="close-btn" @click="closeSelectedTimer">&times;</button>
         <TimerItem 
+          :key="`selected-${selectedTimer?.id}-${preferences.dateFormat}-${preferences.timeFormat}`"
           :timer="selectedTimer"
           @update="handleUpdate"
           @delete="handleDelete"
         />
+      </div>
+    </div>
+
+    <!-- Manual Entry Modal -->
+    <div class="timer-modal-overlay" v-if="showManualEntry" @click.self="closeManualEntry">
+      <div class="timer-modal manual-entry-modal">
+        <button class="close-btn" @click="closeManualEntry">&times;</button>
+        <h3 class="modal-title">Add Past Entry</h3>
+        
+        <form @submit.prevent="saveManualEntry" class="manual-entry-form">
+          <div class="form-group">
+            <label>Start</label>
+            <div class="datetime-inputs">
+              <div class="date-input-wrapper">
+                <input 
+                  type="text" 
+                  v-model="manualEntry.startDate"
+                  :placeholder="getDatePlaceholder()"
+                  @input="onManualStartDateInput"
+                  required
+                />
+                <button type="button" class="date-picker-btn" @click="openManualStartDatePicker">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                </button>
+                <input ref="manualStartDatePicker" type="date" v-model="hiddenManualStartDate" @change="onHiddenManualStartDateChange" class="hidden-date-picker" />
+              </div>
+              <input 
+                type="text" 
+                v-model="manualEntry.startTime"
+                :placeholder="getTimePlaceholder()"
+                required
+              />
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label>End</label>
+            <div class="datetime-inputs">
+              <div class="date-input-wrapper">
+                <input 
+                  type="text" 
+                  v-model="manualEntry.endDate"
+                  :placeholder="getDatePlaceholder()"
+                  @input="onManualEndDateInput"
+                  required
+                />
+                <button type="button" class="date-picker-btn" @click="openManualEndDatePicker">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                </button>
+                <input ref="manualEndDatePicker" type="date" v-model="hiddenManualEndDate" @change="onHiddenManualEndDateChange" class="hidden-date-picker" />
+              </div>
+              <input 
+                type="text" 
+                v-model="manualEntry.endTime"
+                :placeholder="getTimePlaceholder()"
+                required
+              />
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label>Tag (optional)</label>
+            <TagInput 
+              v-model="manualEntry.tag"
+              :tags="tags"
+              placeholder="Add a tag..."
+            />
+          </div>
+          
+          <p v-if="error" class="form-error">{{ error }}</p>
+          
+          <div class="form-actions">
+            <button type="button" @click="closeManualEntry" class="btn-secondary">Cancel</button>
+            <button type="submit" class="btn-primary">Add Entry</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
@@ -783,6 +1166,82 @@ onUnmounted(() => {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+/* Started At */
+.started-at {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.started-at:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.started-at-edit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+
+.started-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.started-at-edit input {
+  width: 70px;
+  padding: 0.25rem 0.375rem;
+  font-size: 0.75rem;
+  text-align: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.started-at-edit input:focus {
+  outline: none;
+}
+
+.btn-icon {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 0.625rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.btn-icon-primary {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: #fff;
+}
+
+.btn-icon-primary:hover {
+  background: var(--accent-hover);
 }
 
 /* Tag Input */
@@ -1030,6 +1489,9 @@ onUnmounted(() => {
 }
 
 .day-separator {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
@@ -1039,6 +1501,15 @@ onUnmounted(() => {
   margin-top: 0.5rem;
   border-bottom: 1px solid var(--border-color);
   margin-bottom: 0.75rem;
+}
+
+.day-label {
+  color: var(--text-muted);
+}
+
+.day-total {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
 }
 
 .day-separator:first-child {
@@ -1091,6 +1562,168 @@ onUnmounted(() => {
   color: var(--text-primary);
 }
 
+/* Manual Entry Button */
+.manual-entry-button {
+  width: 100%;
+  padding: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 1px dashed var(--border-color);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: all 0.2s;
+}
+
+.manual-entry-button:hover {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  background: var(--bg-tertiary);
+}
+
+/* Manual Entry Modal */
+.manual-entry-modal {
+  min-width: 400px;
+}
+
+.modal-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 1.5rem;
+}
+
+.manual-entry-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.form-group label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.form-group input[type="date"],
+.form-group input[type="text"] {
+  padding: 0.625rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+  font-family: inherit;
+}
+
+.form-group input[type="date"]:focus,
+.form-group input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.datetime-inputs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.datetime-inputs > input {
+  flex: 1;
+}
+
+.date-input-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+}
+
+.date-input-wrapper input[type="text"] {
+  flex: 1;
+  padding-right: 2.5rem;
+}
+
+.date-picker-btn {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.date-picker-btn:hover {
+  color: var(--accent-color);
+}
+
+.hidden-date-picker {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.form-error {
+  color: var(--danger-color);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.form-actions .btn-primary,
+.form-actions .btn-secondary {
+  padding: 0.625rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.form-actions .btn-primary {
+  background: var(--accent-color);
+  border: none;
+  color: #fff;
+}
+
+.form-actions .btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.form-actions .btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.form-actions .btn-secondary:hover {
+  border-color: var(--border-light);
+  color: var(--text-primary);
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .layout {
@@ -1136,6 +1769,17 @@ onUnmounted(() => {
   
   .filtered-total {
     text-align: left;
+  }
+  
+  .manual-entry-modal {
+    min-width: auto;
+    width: 90%;
+    max-width: 400px;
+  }
+  
+  .datetime-inputs {
+    flex-direction: column;
+    gap: 0.5rem;
   }
 }
 </style>
