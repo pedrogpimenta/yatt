@@ -86,11 +86,49 @@ PlasmaExtras.Representation {
                 level: 1
                 text: "YATT"
             }
+            
+            // Offline/sync status indicator
+            RowLayout {
+                visible: !root.isOnline || root.pendingSyncCount > 0
+                spacing: Kirigami.Units.smallSpacing
+                
+                Kirigami.Icon {
+                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                    Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                    source: root.isSyncing ? "view-refresh" : (root.isOnline ? "view-refresh" : "network-disconnect")
+                    color: root.isOnline ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.negativeTextColor
+                    
+                    RotationAnimation on rotation {
+                        running: root.isSyncing
+                        from: 0
+                        to: 360
+                        duration: 1000
+                        loops: Animation.Infinite
+                    }
+                }
+                
+                Text {
+                    visible: root.pendingSyncCount > 0
+                    text: root.pendingSyncCount
+                    font.pointSize: 8
+                    color: Kirigami.Theme.neutralTextColor
+                }
+                
+                PlasmaComponents.ToolTip {
+                    text: root.isSyncing ? "Syncing..." : 
+                          (root.isOnline ? root.pendingSyncCount + " pending" : "Offline - " + root.pendingSyncCount + " pending")
+                }
+            }
 
             PlasmaComponents.ToolButton {
                 icon.name: "view-refresh"
-                onClicked: root.fetchTimers()
-                PlasmaComponents.ToolTip { text: "Refresh" }
+                onClicked: {
+                    root.fetchTimers()
+                    if (root.isOnline && root.pendingSyncCount > 0) {
+                        root.syncWithServer()
+                    }
+                }
+                PlasmaComponents.ToolTip { text: root.pendingSyncCount > 0 ? "Refresh & Sync" : "Refresh" }
             }
 
             PlasmaComponents.ToolButton {
@@ -391,11 +429,23 @@ PlasmaExtras.Representation {
             wrapMode: Text.WordWrap
         }
 
-        // Connection error warning
+        // Connection status info
         PlasmaExtras.Heading {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
-            visible: root.token && root.lastApiError !== ""
+            visible: root.token && !root.isOnline
+            level: 4
+            text: "Offline mode - changes will sync when connected"
+            color: Kirigami.Theme.neutralTextColor
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+        }
+        
+        // Connection error warning (for non-offline errors)
+        PlasmaExtras.Heading {
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignHCenter
+            visible: root.token && root.lastApiError !== "" && root.lastApiError !== "Offline mode"
             level: 4
             text: root.lastApiError
             color: Kirigami.Theme.negativeTextColor
