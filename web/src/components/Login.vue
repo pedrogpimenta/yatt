@@ -90,7 +90,7 @@ h2 {
 }
 
 .login::before {
-  content: 'YATT';
+  content: 'Time Command';
   display: block;
   text-align: center;
   font-size: 2.5rem;

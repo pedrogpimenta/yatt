@@ -363,7 +363,7 @@ onUnmounted(() => {
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="sidebar-header">
-        <h1 class="logo">YATT</h1>
+        <h1 class="logo">Time Command</h1>
         <div class="header-actions">
           <!-- Offline/Sync indicator -->
           <div class="sync-status" :class="{ offline: !isOnline, syncing: syncing }">
