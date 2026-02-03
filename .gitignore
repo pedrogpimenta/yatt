@@ -1,1 +1,4 @@
 .env
+web/dist
+web/node_modules
+web/package-lock.json
