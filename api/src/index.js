@@ -5,6 +5,7 @@ const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
 const authRoutes = require('./routes/auth');
 const timerRoutes = require('./routes/timers');
+const syncRoutes = require('./routes/sync');
 const { JWT_SECRET } = require('./middleware/auth');
 
 const app = express();
@@ -87,6 +88,7 @@ app.set('broadcastToUser', broadcastToUser);
 // Routes
 app.use('/auth', authRoutes);
 app.use('/timers', timerRoutes);
+app.use('/sync', syncRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

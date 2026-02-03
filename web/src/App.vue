@@ -12,9 +12,8 @@ function handleLogin() {
   isLoggedIn.value = true
 }
 
-function handleLogout() {
-  api.clearToken()
-  api.disconnectWebSocket()
+async function handleLogout() {
+  await api.logout()
   isLoggedIn.value = false
   showSettings.value = false
 }

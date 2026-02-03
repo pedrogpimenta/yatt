@@ -249,6 +249,21 @@ export async function getMeta(key) {
   })
 }
 
+// Clear all local data (for logout)
+export async function clearAllData() {
+  const database = await openDB()
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(['timers', 'syncQueue', 'meta'], 'readwrite')
+    
+    const timersClear = transaction.objectStore('timers').clear()
+    const syncQueueClear = transaction.objectStore('syncQueue').clear()
+    const metaClear = transaction.objectStore('meta').clear()
+    
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error)
+  })
+}
+
 // Get unique tags from local timers
 export async function getLocalTags() {
   const timers = await getAllTimers()

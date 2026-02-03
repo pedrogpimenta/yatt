@@ -25,6 +25,11 @@ async function handleSubmit() {
     loading.value = false
   }
 }
+
+function useWithoutAccount() {
+  api.setLocalMode(true)
+  emit('login')
+}
 </script>
 
 <template>
@@ -67,6 +72,17 @@ async function handleSubmit() {
       <button @click="isRegistering = !isRegistering" class="link-btn">
         {{ isRegistering ? 'Sign in' : 'Register' }}
       </button>
+    </p>
+
+    <div class="divider">
+      <span>or</span>
+    </div>
+
+    <button @click="useWithoutAccount" class="local-btn">
+      Use without account
+    </button>
+    <p class="local-hint">
+      Data stays on this device. You can sync with other devices via QR code.
     </p>
   </div>
 </template>
@@ -177,5 +193,49 @@ input::placeholder {
 
 .link-btn:hover {
   color: var(--accent-hover);
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 1.5rem 0;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+.divider span {
+  padding: 0 1rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.local-btn {
+  width: 100%;
+  padding: 0.875rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.local-btn:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border-light);
+}
+
+.local-hint {
+  text-align: center;
+  margin-top: 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
 }
 </style>

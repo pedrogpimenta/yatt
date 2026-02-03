@@ -1,14 +1,21 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { api } from '../api.js'
 import { preferences } from '../preferences.js'
+import DeviceSync from './DeviceSync.vue'
 
 const emit = defineEmits(['close', 'logout'])
 
 function handleKeydown(e) {
   if (e.key === 'Escape') {
     e.stopPropagation()
-    emit('close')
+    if (showLogoutConfirm.value) {
+      showLogoutConfirm.value = false
+    } else if (showSyncModal.value) {
+      showSyncModal.value = false
+    } else {
+      emit('close')
+    }
   }
 }
 
@@ -16,6 +23,11 @@ const user = ref(null)
 const loading = ref(true)
 const error = ref('')
 const success = ref('')
+
+// Local mode detection
+const isLocalMode = computed(() => api.isLocalMode())
+const showSyncModal = ref(false)
+const showLogoutConfirm = ref(false)
 
 // Password change form
 const currentPassword = ref('')
@@ -30,6 +42,10 @@ const tokenCopied = ref(false)
 const token = api.getToken()
 
 async function fetchUser() {
+  if (isLocalMode.value) {
+    loading.value = false
+    return
+  }
   try {
     user.value = await api.getMe()
   } catch (err) {
@@ -37,6 +53,14 @@ async function fetchUser() {
   } finally {
     loading.value = false
   }
+}
+
+function handleSynced() {
+  showSyncModal.value = false
+  success.value = 'Devices synced successfully!'
+  setTimeout(() => {
+    success.value = ''
+  }, 3000)
 }
 
 async function handleChangePassword() {
@@ -86,7 +110,20 @@ async function copyToken() {
 }
 
 function handleLogout() {
+  if (isLocalMode.value) {
+    showLogoutConfirm.value = true
+  } else {
+    emit('logout')
+  }
+}
+
+function confirmLogout() {
+  showLogoutConfirm.value = false
   emit('logout')
+}
+
+function cancelLogout() {
+  showLogoutConfirm.value = false
 }
 
 onMounted(() => {
@@ -127,8 +164,19 @@ onUnmounted(() => {
           </div>
         </section>
 
-        <!-- Account Info -->
-        <section class="settings-section">
+        <!-- Local Mode Info & Sync -->
+        <section v-if="isLocalMode" class="settings-section">
+          <h3>Local Mode</h3>
+          <p class="section-description">
+            You're using the app without an account. Data is stored locally on this device.
+          </p>
+          <button @click="showSyncModal = true" class="sync-btn">
+            Sync with another device
+          </button>
+        </section>
+
+        <!-- Account Info (only for logged in users) -->
+        <section v-if="!isLocalMode" class="settings-section">
           <h3>Account</h3>
           <div v-if="loading" class="loading">Loading...</div>
           <div v-else-if="user" class="account-info">
@@ -143,8 +191,8 @@ onUnmounted(() => {
           </div>
         </section>
 
-        <!-- Auth Token -->
-        <section class="settings-section">
+        <!-- Auth Token (only for logged in users) -->
+        <section v-if="!isLocalMode" class="settings-section">
           <h3>Auth Token</h3>
           <p class="section-description">Use this token to authenticate the KDE widget or other clients.</p>
           <div class="token-container">
@@ -163,8 +211,8 @@ onUnmounted(() => {
           </div>
         </section>
 
-        <!-- Change Password -->
-        <section class="settings-section">
+        <!-- Change Password (only for logged in users) -->
+        <section v-if="!isLocalMode" class="settings-section">
           <h3>Change Password</h3>
           <form @submit.prevent="handleChangePassword" class="password-form">
             <div class="form-group">
@@ -203,8 +251,36 @@ onUnmounted(() => {
 
         <!-- Logout -->
         <section class="settings-section logout-section">
-          <button @click="handleLogout" class="logout-btn">Logout</button>
+          <button @click="handleLogout" class="logout-btn">
+            {{ isLocalMode ? 'Exit Local Mode' : 'Logout' }}
+          </button>
         </section>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Sync Modal (outside settings overlay) -->
+  <DeviceSync 
+    v-if="showSyncModal" 
+    @close="showSyncModal = false"
+    @synced="handleSynced"
+  />
+
+  <!-- Logout Confirmation Modal -->
+  <div v-if="showLogoutConfirm" class="confirm-overlay" @click.self="cancelLogout">
+    <div class="confirm-modal">
+      <h3>Exit Local Mode?</h3>
+      <p class="confirm-warning">
+        All your timers and data stored on this device will be permanently deleted. 
+        This action cannot be undone.
+      </p>
+      <p class="confirm-hint">
+        If you want to keep your data, sync with another device first or create an account.
+      </p>
+      <div class="confirm-actions">
+        <button @click="cancelLogout" class="btn-cancel">Cancel</button>
+        <button @click="confirmLogout" class="btn-danger">Delete All Data & Exit</button>
       </div>
     </div>
   </div>
@@ -478,5 +554,102 @@ onUnmounted(() => {
 .loading {
   color: var(--text-muted);
   font-size: 0.875rem;
+}
+
+.sync-btn {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--accent-color);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+
+.sync-btn:hover {
+  background: var(--accent-hover);
+}
+
+/* Confirmation Modal */
+.confirm-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.confirm-modal {
+  background: var(--bg-primary);
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 90%;
+  max-width: 400px;
+}
+
+.confirm-modal h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 1rem;
+}
+
+.confirm-warning {
+  color: var(--danger-color);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin-bottom: 0.75rem;
+}
+
+.confirm-hint {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  margin-bottom: 1.5rem;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.btn-cancel {
+  padding: 0.625rem 1rem;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-cancel:hover {
+  border-color: var(--border-light);
+  color: var(--text-primary);
+}
+
+.btn-danger {
+  padding: 0.625rem 1rem;
+  background: var(--danger-color);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-danger:hover {
+  background: var(--danger-hover);
 }
 </style>

@@ -7,11 +7,46 @@ let isOnline = navigator.onLine
 let onlineListeners = new Set()
 let syncInProgress = false
 
+// Local-only mode (no account)
+const LOCAL_MODE_KEY = 'yatt_local_mode'
+const DEVICE_ID_KEY = 'yatt_device_id'
+
+function isLocalMode() {
+  return localStorage.getItem(LOCAL_MODE_KEY) === 'true'
+}
+
+function setLocalMode(enabled) {
+  if (enabled) {
+    localStorage.setItem(LOCAL_MODE_KEY, 'true')
+    // Generate a device ID for sync purposes
+    if (!localStorage.getItem(DEVICE_ID_KEY)) {
+      localStorage.setItem(DEVICE_ID_KEY, generateDeviceId())
+    }
+  } else {
+    localStorage.removeItem(LOCAL_MODE_KEY)
+  }
+}
+
+function getDeviceId() {
+  let deviceId = localStorage.getItem(DEVICE_ID_KEY)
+  if (!deviceId) {
+    deviceId = generateDeviceId()
+    localStorage.setItem(DEVICE_ID_KEY, deviceId)
+  }
+  return deviceId
+}
+
+function generateDeviceId() {
+  return `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
 // Initialize online/offline listeners
 window.addEventListener('online', () => {
   isOnline = true
   notifyOnlineStatus(true)
-  attemptSync()
+  if (!isLocalMode()) {
+    attemptSync()
+  }
 })
 
 window.addEventListener('offline', () => {
@@ -38,6 +73,10 @@ function getOnlineStatus() {
 }
 
 function getToken() {
+  // In local mode, return a fake token to indicate "logged in"
+  if (isLocalMode()) {
+    return 'local_mode'
+  }
   return localStorage.getItem('token')
 }
 
@@ -47,6 +86,18 @@ function setToken(token) {
 
 function clearToken() {
   localStorage.removeItem('token')
+  setLocalMode(false)
+}
+
+async function logout() {
+  // Clear all local data
+  await offlineStorage.clearAllData()
+  // Clear token and local mode
+  localStorage.removeItem('token')
+  localStorage.removeItem(LOCAL_MODE_KEY)
+  localStorage.removeItem(DEVICE_ID_KEY)
+  // Disconnect WebSocket
+  disconnectWebSocket()
 }
 
 async function request(endpoint, options = {}) {
@@ -211,6 +262,9 @@ function getWsUrl() {
 }
 
 function connectWebSocket() {
+  // Don't connect WebSocket in local mode
+  if (isLocalMode()) return
+  
   const token = getToken()
   if (!token || ws?.readyState === WebSocket.OPEN) return
 
@@ -328,6 +382,11 @@ export const api = {
 
   // Timer methods with offline support
   async getTimers() {
+    // In local mode, always use local storage
+    if (isLocalMode()) {
+      return await offlineStorage.getAllTimers()
+    }
+
     const result = await tryRequest('/timers')
     
     if (result !== null) {
@@ -341,6 +400,11 @@ export const api = {
   },
 
   async getTags() {
+    // In local mode, always use local storage
+    if (isLocalMode()) {
+      return await offlineStorage.getLocalTags()
+    }
+
     const result = await tryRequest('/timers/tags')
     
     if (result !== null) {
@@ -356,6 +420,18 @@ export const api = {
     const timerData = {
       ...data,
       start_time: data.start_time || new Date().toISOString()
+    }
+
+    // In local mode, always create locally
+    if (isLocalMode()) {
+      const localId = offlineStorage.generateLocalId()
+      const localTimer = {
+        id: localId,
+        ...timerData,
+        end_time: timerData.end_time || null
+      }
+      await offlineStorage.saveTimer(localTimer)
+      return localTimer
     }
 
     const result = await tryRequest('/timers', {
@@ -395,6 +471,11 @@ export const api = {
       await offlineStorage.saveTimer(updatedTimer)
     }
 
+    // In local mode, just return the updated timer
+    if (isLocalMode()) {
+      return await offlineStorage.getTimer(id)
+    }
+
     const result = await tryRequest(`/timers/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data)
@@ -427,6 +508,11 @@ export const api = {
       await offlineStorage.saveTimer(existingTimer)
     }
 
+    // In local mode, just return the updated timer
+    if (isLocalMode()) {
+      return existingTimer
+    }
+
     const result = await tryRequest(`/timers/${id}/stop`, {
       method: 'POST'
     })
@@ -450,6 +536,11 @@ export const api = {
     // Delete locally first
     await offlineStorage.deleteTimer(id)
 
+    // In local mode, we're done
+    if (isLocalMode()) {
+      return null
+    }
+
     const result = await tryRequest(`/timers/${id}`, {
       method: 'DELETE'
     })
@@ -465,5 +556,78 @@ export const api = {
     }
 
     return null
-  }
+  },
+
+  // Sync methods for QR code pairing
+  async createSyncSession() {
+    const timers = await offlineStorage.getAllTimers()
+    const deviceId = getDeviceId()
+    
+    const res = await fetch(`${API_BASE}/sync/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId, timers })
+    })
+    
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.error || 'Failed to create sync session')
+    }
+    
+    return await res.json()
+  },
+
+  async joinSyncSession(syncCode) {
+    const timers = await offlineStorage.getAllTimers()
+    const deviceId = getDeviceId()
+    
+    const res = await fetch(`${API_BASE}/sync/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ syncCode, deviceId, timers })
+    })
+    
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.error || 'Failed to join sync session')
+    }
+    
+    return await res.json()
+  },
+
+  async getSyncStatus(syncCode) {
+    const res = await fetch(`${API_BASE}/sync/status/${syncCode}`)
+    
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.error || 'Failed to get sync status')
+    }
+    
+    return await res.json()
+  },
+
+  async completeSyncImport(timers) {
+    // Merge timers into local storage
+    const existingTimers = await offlineStorage.getAllTimers()
+    const existingIds = new Set(existingTimers.map(t => t.id))
+    
+    // Add new timers, update existing ones
+    for (const timer of timers) {
+      // Generate new local ID if it conflicts
+      if (existingIds.has(timer.id)) {
+        const newId = offlineStorage.generateLocalId()
+        await offlineStorage.saveTimer({ ...timer, id: newId })
+      } else {
+        await offlineStorage.saveTimer(timer)
+      }
+    }
+  },
+
+  // Local mode helpers
+  isLocalMode,
+  setLocalMode,
+  getDeviceId,
+  
+  // Logout (clears all local data)
+  logout
 }
