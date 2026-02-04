@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { api } from './api.js'
+import { preferences } from './preferences.js'
 import Login from './components/Login.vue'
 import Timer from './components/Timer.vue'
 import Settings from './components/Settings.vue'
@@ -8,8 +9,23 @@ import Settings from './components/Settings.vue'
 const isLoggedIn = ref(!!api.getToken())
 const showSettings = ref(false)
 
-function handleLogin() {
+async function loadUserPreferences() {
+  if (!api.getToken() || api.isLocalMode()) {
+    return
+  }
+  try {
+    const userPreferences = await api.getUserPreferences()
+    if (userPreferences && typeof userPreferences.dayStartHour === 'number') {
+      preferences.dayStartHour = userPreferences.dayStartHour
+    }
+  } catch (err) {
+    console.error('Failed to load user preferences:', err)
+  }
+}
+
+async function handleLogin() {
   isLoggedIn.value = true
+  await loadUserPreferences()
 }
 
 async function handleLogout() {
@@ -28,6 +44,9 @@ function closeSettings() {
 
 onMounted(() => {
   isLoggedIn.value = !!api.getToken()
+  if (isLoggedIn.value) {
+    loadUserPreferences()
+  }
 })
 </script>
 

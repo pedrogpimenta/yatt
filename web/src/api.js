@@ -373,6 +373,23 @@ export const api = {
     return request('/auth/me')
   },
 
+  getUserPreferences() {
+    if (isLocalMode()) {
+      return Promise.resolve(null)
+    }
+    return tryRequest('/auth/preferences')
+  },
+
+  updateUserPreferences(preferences) {
+    if (isLocalMode()) {
+      return Promise.resolve(null)
+    }
+    return tryRequest('/auth/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(preferences)
+    })
+  },
+
   changePassword(currentPassword, newPassword) {
     return request('/auth/change-password', {
       method: 'POST',

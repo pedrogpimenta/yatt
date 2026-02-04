@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { api } from '../api.js'
 import { preferences } from '../preferences.js'
 import * as offlineStorage from '../offlineStorage.js'
@@ -55,6 +55,20 @@ async function fetchUser() {
     loading.value = false
   }
 }
+
+watch(() => preferences.dayStartHour, async (newValue, oldValue) => {
+  if (isLocalMode.value) {
+    return
+  }
+  if (newValue === oldValue || typeof newValue !== 'number') {
+    return
+  }
+  try {
+    await api.updateUserPreferences({ dayStartHour: newValue })
+  } catch (err) {
+    error.value = err.message
+  }
+})
 
 function handleSynced() {
   showSyncModal.value = false
