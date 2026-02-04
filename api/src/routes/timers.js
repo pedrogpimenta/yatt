@@ -69,13 +69,26 @@ router.get('/:id', (req, res) => {
 // Start a new timer
 router.post('/', (req, res) => {
   try {
-    const { start_time, end_time, tag } = req.body;
+    const { start_time, end_time, tag, project_id } = req.body;
     const startTime = start_time || new Date().toISOString();
+    let projectId = null;
+
+    if (project_id !== null && project_id !== undefined && project_id !== '') {
+      const parsedProjectId = Number(project_id);
+      if (!Number.isInteger(parsedProjectId)) {
+        return res.status(400).json({ error: 'Invalid project_id' });
+      }
+      const project = db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(parsedProjectId, req.userId);
+      if (!project) {
+        return res.status(400).json({ error: 'Project not found' });
+      }
+      projectId = parsedProjectId;
+    }
 
     const result = db.prepare(`
-      INSERT INTO timers (user_id, start_time, end_time, tag) 
-      VALUES (?, ?, ?, ?)
-    `).run(req.userId, startTime, end_time || null, tag || null);
+      INSERT INTO timers (user_id, start_time, end_time, tag, project_id) 
+      VALUES (?, ?, ?, ?, ?)
+    `).run(req.userId, startTime, end_time || null, tag || null, projectId);
 
     const timer = db.prepare('SELECT * FROM timers WHERE id = ?').get(result.lastInsertRowid);
 
@@ -96,15 +109,53 @@ router.patch('/:id', (req, res) => {
       return res.status(404).json({ error: 'Timer not found' });
     }
 
-    const { start_time, end_time, tag } = req.body;
-    
-    db.prepare(`
-      UPDATE timers 
-      SET start_time = COALESCE(?, start_time),
-          end_time = COALESCE(?, end_time),
-          tag = COALESCE(?, tag)
-      WHERE id = ? AND user_id = ?
-    `).run(start_time, end_time, tag, req.params.id, req.userId);
+    const { start_time, end_time, tag, project_id } = req.body;
+
+    let projectId;
+    if (Object.prototype.hasOwnProperty.call(req.body, 'project_id')) {
+      if (project_id === null || project_id === '') {
+        projectId = null;
+      } else {
+        const parsedProjectId = Number(project_id);
+        if (!Number.isInteger(parsedProjectId)) {
+          return res.status(400).json({ error: 'Invalid project_id' });
+        }
+        const project = db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(parsedProjectId, req.userId);
+        if (!project) {
+          return res.status(400).json({ error: 'Project not found' });
+        }
+        projectId = parsedProjectId;
+      }
+    }
+
+    const updates = [];
+    const params = [];
+
+    if (start_time !== undefined) {
+      updates.push('start_time = ?');
+      params.push(start_time);
+    }
+    if (end_time !== undefined) {
+      updates.push('end_time = ?');
+      params.push(end_time);
+    }
+    if (tag !== undefined) {
+      updates.push('tag = ?');
+      params.push(tag);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'project_id')) {
+      updates.push('project_id = ?');
+      params.push(projectId);
+    }
+
+    if (updates.length > 0) {
+      params.push(req.params.id, req.userId);
+      db.prepare(`
+        UPDATE timers 
+        SET ${updates.join(', ')}
+        WHERE id = ? AND user_id = ?
+      `).run(...params);
+    }
 
     const updatedTimer = db.prepare('SELECT * FROM timers WHERE id = ?').get(req.params.id);
 

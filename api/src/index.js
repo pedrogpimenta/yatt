@@ -6,6 +6,8 @@ const jwt = require('jsonwebtoken');
 const authRoutes = require('./routes/auth');
 const timerRoutes = require('./routes/timers');
 const syncRoutes = require('./routes/sync');
+const projectRoutes = require('./routes/projects');
+const clientRoutes = require('./routes/clients');
 const { JWT_SECRET } = require('./middleware/auth');
 
 const app = express();
@@ -89,6 +91,8 @@ app.set('broadcastToUser', broadcastToUser);
 app.use('/auth', authRoutes);
 app.use('/timers', timerRoutes);
 app.use('/sync', syncRoutes);
+app.use('/projects', projectRoutes);
+app.use('/clients', clientRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
