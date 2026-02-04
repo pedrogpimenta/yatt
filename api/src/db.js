@@ -53,7 +53,6 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_projects_client_id ON projects(client_id);
   CREATE INDEX IF NOT EXISTS idx_timers_user_id ON timers(user_id);
   CREATE INDEX IF NOT EXISTS idx_timers_start_time ON timers(start_time);
-  CREATE INDEX IF NOT EXISTS idx_timers_project_id ON timers(project_id);
 `);
 
 // Ensure new columns exist for existing databases
@@ -68,5 +67,7 @@ const hasProjectId = timerColumns.some((column) => column.name === 'project_id')
 if (!hasProjectId) {
   db.exec('ALTER TABLE timers ADD COLUMN project_id INTEGER;');
 }
+
+db.exec('CREATE INDEX IF NOT EXISTS idx_timers_project_id ON timers(project_id);');
 
 module.exports = db;
