@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.icons.Icons
 import androidx.compose.material3.icons.outlined.Close
+import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -31,6 +32,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.asImageBitmap
+import android.graphics.Bitmap
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import org.yatt.app.viewmodel.DeviceSyncViewModel
 
 private enum class SyncType { ONLINE, OFFLINE }
@@ -112,6 +117,18 @@ fun DeviceSyncScreen(
                     text = uiState.syncCode,
                     style = MaterialTheme.typography.headlineMedium
                 )
+                if (uiState.syncCode.isNotBlank()) {
+                    val qrBitmap = remember(uiState.syncCode) {
+                        createQrBitmap(uiState.syncCode, 400)
+                    }
+                    Image(
+                        bitmap = qrBitmap.asImageBitmap(),
+                        contentDescription = "Sync QR code",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(240.dp)
+                    )
+                }
                 if (uiState.polling) {
                     Text("Waiting for another device...")
                 }
@@ -211,4 +228,16 @@ fun DeviceSyncScreen(
             Divider()
         }
     }
+}
+
+private fun createQrBitmap(text: String, size: Int): Bitmap {
+    val bitMatrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, size, size)
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    for (x in 0 until size) {
+        for (y in 0 until size) {
+            val color = if (bitMatrix.get(x, y)) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+            bitmap.setPixel(x, y, color)
+        }
+    }
+    return bitmap
 }
