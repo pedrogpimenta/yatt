@@ -1,0 +1,253 @@
+package org.yatt.app.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.icons.Icons
+import androidx.compose.material3.icons.outlined.ChevronLeft
+import androidx.compose.material3.icons.outlined.ChevronRight
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import org.yatt.app.data.UserPreferences
+import org.yatt.app.data.local.TimerEntity
+import org.yatt.app.util.TimeUtils
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+@Composable
+fun WeekCalendarView(
+    timers: List<TimerEntity>,
+    now: Instant,
+    preferences: UserPreferences,
+    onSelect: (TimerEntity) -> Unit
+) {
+    var weekOffset by remember { mutableStateOf(0) }
+    val zoneId = ZoneId.systemDefault()
+    val weekStart = LocalDate.now(zoneId).with(DayOfWeek.MONDAY).plusWeeks(weekOffset.toLong())
+    val days = (0..6).map { weekStart.plusDays(it.toLong()) }
+    val scrollState = rememberScrollState()
+    val horizontalScrollState = rememberScrollState()
+    val hourHeight = 48.dp
+    val columnWidth = 120.dp
+
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { weekOffset-- }) {
+                Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous week")
+            }
+            Button(onClick = { weekOffset = 0 }) {
+                Text("Today")
+            }
+            IconButton(onClick = { weekOffset++ }) {
+                Icon(Icons.Outlined.ChevronRight, contentDescription = "Next week")
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = weekLabel(weekStart, preferences),
+                style = MaterialTheme.typography.titleMedium
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
+        ) {
+            Row(
+                modifier = Modifier.horizontalScroll(horizontalScrollState)
+            ) {
+                TimeColumn(hourHeight = hourHeight)
+                days.forEach { day ->
+                    DayColumn(
+                        day = day,
+                        timers = timers,
+                        now = now,
+                        hourHeight = hourHeight,
+                        width = columnWidth,
+                        onSelect = onSelect
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimeColumn(hourHeight: Dp) {
+    Column(
+        modifier = Modifier
+            .width(56.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        repeat(24) { hour ->
+            Box(
+                modifier = Modifier
+                    .height(hourHeight)
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                contentAlignment = Alignment.TopEnd
+            ) {
+                Text(
+                    text = String.format(Locale.US, "%02d:00", hour),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(end = 6.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DayColumn(
+    day: LocalDate,
+    timers: List<TimerEntity>,
+    now: Instant,
+    hourHeight: Dp,
+    width: Dp,
+    onSelect: (TimerEntity) -> Unit
+) {
+    val zoneId = ZoneId.systemDefault()
+    val dayStart = day.atStartOfDay(zoneId).toInstant()
+    val dayEnd = day.plusDays(1).atStartOfDay(zoneId).toInstant()
+    val headerLabel = day.format(DateTimeFormatter.ofPattern("EEE dd", Locale.US))
+
+    val totalHeight = hourHeight * 24
+    val density = LocalDensity.current
+    val blocks = remember(timers, now) {
+        timersForDay(timers, dayStart, dayEnd, now)
+    }
+
+    Column(
+        modifier = Modifier.width(width)
+    ) {
+        Surface(
+            tonalElevation = 1.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = headerLabel,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                style = MaterialTheme.typography.labelMedium
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .height(totalHeight)
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
+        ) {
+            blocks.forEach { block ->
+                val top = with(density) { (totalHeight * block.topFraction).toDp() }
+                val height = with(density) { (totalHeight * block.heightFraction).toDp() }
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .offset(y = top)
+                        .height(height.coerceAtLeast(8.dp))
+                        .fillMaxWidth()
+                        .background(
+                            if (block.isRunning) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.secondary
+                        )
+                        .clickable { onSelect(block.timer) }
+                        .padding(4.dp)
+                ) {
+                    Text(
+                        text = block.label,
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class TimerBlock(
+    val timer: TimerEntity,
+    val topFraction: Float,
+    val heightFraction: Float,
+    val isRunning: Boolean,
+    val label: String
+)
+
+private fun timersForDay(
+    timers: List<TimerEntity>,
+    dayStart: Instant,
+    dayEnd: Instant,
+    now: Instant
+): List<TimerBlock> {
+    val result = mutableListOf<TimerBlock>()
+    timers.forEach { timer ->
+        val start = TimeUtils.parseInstant(timer.startTime)
+        val end = timer.endTime?.let { TimeUtils.parseInstant(it) } ?: now
+        if (start >= dayEnd || end <= dayStart) return@forEach
+        val displayStart = if (start < dayStart) dayStart else start
+        val displayEnd = if (end > dayEnd) dayEnd else end
+        val totalMinutes = 24 * 60f
+        val startMinutes = minutesSince(dayStart, displayStart)
+        val endMinutes = minutesSince(dayStart, displayEnd)
+        val topFraction = (startMinutes / totalMinutes).coerceIn(0f, 1f)
+        val heightFraction = ((endMinutes - startMinutes) / totalMinutes).coerceAtLeast(0.01f)
+        result.add(
+            TimerBlock(
+                timer = timer,
+                topFraction = topFraction,
+                heightFraction = heightFraction,
+                isRunning = timer.endTime == null,
+                label = timer.tag?.ifBlank { "No tag" } ?: "No tag"
+            )
+        )
+    }
+    return result
+}
+
+private fun minutesSince(start: Instant, end: Instant): Float {
+    val diff = end.toEpochMilli() - start.toEpochMilli()
+    return diff / 60000f
+}
+
+private fun weekLabel(weekStart: LocalDate, preferences: UserPreferences): String {
+    val zoneId = ZoneId.systemDefault()
+    val startInstant = weekStart.atStartOfDay(zoneId).toInstant()
+    val endInstant = weekStart.plusDays(6).atStartOfDay(zoneId).toInstant()
+    val startLabel = TimeUtils.formatDate(startInstant, preferences.dateFormat)
+    val endLabel = TimeUtils.formatDate(endInstant, preferences.dateFormat)
+    return "$startLabel - $endLabel"
+}

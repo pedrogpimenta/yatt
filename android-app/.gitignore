@@ -1,5 +1,12 @@
-node_modules
-dist
-android
-.gradle
+*.iml
+.gradle/
+.idea/
+.DS_Store
+build/
+local.properties
+captures/
+*.apk
+*.aab
 *.log
+/.externalNativeBuild/
+/.cxx/
