@@ -365,13 +365,14 @@ private fun FilterRow(
     onTagSelected: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val displayValue = if (selectedTag.isBlank()) "All tags" else selectedTag
 
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { expanded = it }
     ) {
         OutlinedTextField(
-            value = selectedTag,
+            value = displayValue,
             onValueChange = {},
             label = { Text("Filter by tag") },
             readOnly = true,
