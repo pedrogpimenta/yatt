@@ -8,25 +8,22 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import org.yatt.app.MainActivity
 import org.yatt.app.R
 import java.time.Duration
 import java.time.Instant
 
 class TimerForegroundService : Service() {
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var tickerJob: Job? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private var tickRunnable: Runnable? = null
     private var startInstant: Instant? = null
     private var tag: String? = null
+    private var totalTodaySecondsWithoutCurrent: Long = 0
+    private var runningTimerId: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -40,6 +37,8 @@ class TimerForegroundService : Service() {
                 if (startTime != null) {
                     startInstant = Instant.parse(startTime)
                     tag = intent.getStringExtra(EXTRA_TAG)
+                    totalTodaySecondsWithoutCurrent = intent.getLongExtra(EXTRA_TODAY_TOTAL_SECONDS, 0)
+                    runningTimerId = intent.getStringExtra(EXTRA_TIMER_ID)
                     startForeground(NOTIFICATION_ID, buildNotification())
                     startTicker()
                 }
@@ -55,59 +54,84 @@ class TimerForegroundService : Service() {
 
     override fun onDestroy() {
         stopTicker()
+        stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startTicker() {
-        if (tickerJob?.isActive == true) return
-        tickerJob = serviceScope.launch {
-            while (true) {
-                updateNotification()
-                delay(1000)
+        if (tickRunnable != null) return
+        tickRunnable = object : Runnable {
+            override fun run() {
+                // Use notify() for updates to avoid icon flicker; only startForeground() was used once
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.notify(NOTIFICATION_ID, buildNotification())
+                handler.postDelayed(this, 60_000) // update every minute
             }
         }
+        handler.postDelayed(tickRunnable!!, 60_000) // first update in 1 minute
     }
 
     private fun stopTicker() {
-        tickerJob?.cancel()
-        tickerJob = null
-    }
-
-    private fun updateNotification() {
-        NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, buildNotification())
+        tickRunnable?.let { handler.removeCallbacks(it) }
+        tickRunnable = null
     }
 
     private fun buildNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
+        val contentIntent = Intent(this, MainActivity::class.java)
+        val contentPendingIntent = PendingIntent.getActivity(
             this,
             0,
-            intent,
+            contentIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val elapsed = startInstant?.let { Duration.between(it, Instant.now()) } ?: Duration.ZERO
-        val elapsedText = formatDuration(elapsed)
-        val title = tag?.takeIf { it.isNotBlank() } ?: "Timer running"
+        val stopIntent = Intent(this, MainActivity::class.java).apply {
+            putExtra(EXTRA_STOP_TIMER_ID, runningTimerId)
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val stopPendingIntent = PendingIntent.getActivity(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val now = Instant.now()
+        val currentElapsed = startInstant?.let { Duration.between(it, now) } ?: Duration.ZERO
+        val currentText = formatDuration(currentElapsed)
+        val totalTodaySeconds = totalTodaySecondsWithoutCurrent + currentElapsed.seconds
+        val totalTodayText = formatDuration(Duration.ofSeconds(totalTodaySeconds))
+        val title = "Today $totalTodayText"
+        val contentText = if (tag?.isNotBlank() == true) {
+            "Current timer: $tag · $currentText"
+        } else {
+            "Current timer: $currentText"
+        }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
-            .setContentText(elapsedText)
-            .setContentIntent(pendingIntent)
+            .setContentText(contentText)
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .setBigContentTitle(title)
+                    .bigText(contentText)
+            )
+            .setContentIntent(contentPendingIntent)
+            .setShowWhen(false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .addAction(android.R.drawable.ic_media_pause, "Stop timer", stopPendingIntent)
             .build()
     }
 
     private fun formatDuration(duration: Duration): String {
-        val totalSeconds = duration.seconds.coerceAtLeast(0)
-        val hours = totalSeconds / 3600
-        val minutes = (totalSeconds % 3600) / 60
-        val seconds = totalSeconds % 60
-        return String.format("%02d:%02d:%02d", hours, minutes, seconds)
+        val totalMinutes = duration.toMinutes().coerceAtLeast(0)
+        val hours = totalMinutes / 60
+        val minutes = totalMinutes % 60
+        return String.format("%02d:%02d", hours, minutes)
     }
 
     private fun createNotificationChannel() {
@@ -129,6 +153,9 @@ class TimerForegroundService : Service() {
 
         const val EXTRA_START_TIME = "extra_start_time"
         const val EXTRA_TAG = "extra_tag"
+        const val EXTRA_TIMER_ID = "extra_timer_id"
+        const val EXTRA_TODAY_TOTAL_SECONDS = "extra_today_total_seconds"
+        const val EXTRA_STOP_TIMER_ID = "org.yatt.app.extra.STOP_TIMER_ID"
 
         private const val CHANNEL_ID = "timer_channel"
         private const val NOTIFICATION_ID = 2001

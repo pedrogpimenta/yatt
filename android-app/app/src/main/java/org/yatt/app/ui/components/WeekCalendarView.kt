@@ -20,9 +20,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.icons.Icons
-import androidx.compose.material3.icons.outlined.ChevronLeft
-import androidx.compose.material3.icons.outlined.ChevronRight
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.comparisons.maxOf
 import org.yatt.app.data.UserPreferences
 import org.yatt.app.data.local.TimerEntity
 import org.yatt.app.util.TimeUtils
@@ -146,6 +147,7 @@ private fun DayColumn(
 
     val totalHeight = hourHeight * 24
     val density = LocalDensity.current
+    val totalHeightPx = with(density) { totalHeight.toPx() }
     val blocks = remember(timers, now) {
         timersForDay(timers, dayStart, dayEnd, now)
     }
@@ -173,13 +175,13 @@ private fun DayColumn(
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
         ) {
             blocks.forEach { block ->
-                val top = with(density) { (totalHeight * block.topFraction).toDp() }
-                val height = with(density) { (totalHeight * block.heightFraction).toDp() }
+                val top = with(density) { (totalHeightPx * block.topFraction).toDp() }
+                val height = with(density) { (totalHeightPx * block.heightFraction).toDp() }
                 Box(
                     modifier = Modifier
                         .padding(horizontal = 4.dp)
                         .offset(y = top)
-                        .height(height.coerceAtLeast(8.dp))
+                        .height(maxOf(height, 8.dp))
                         .fillMaxWidth()
                         .background(
                             if (block.isRunning) MaterialTheme.colorScheme.primary

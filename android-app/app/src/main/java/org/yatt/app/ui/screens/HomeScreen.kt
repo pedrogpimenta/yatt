@@ -2,6 +2,7 @@ package org.yatt.app.ui.screens
 
 import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -24,16 +26,18 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.icons.Icons
-import androidx.compose.material3.icons.outlined.CloudOff
-import androidx.compose.material3.icons.outlined.Settings
-import androidx.compose.material3.icons.outlined.Sync
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.List
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -44,8 +48,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardActions
-import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import org.yatt.app.data.UserPreferences
 import org.yatt.app.data.local.TimerEntity
@@ -55,6 +59,7 @@ import org.yatt.app.ui.components.TimerEditDialog
 import org.yatt.app.ui.components.TimerListItem
 import org.yatt.app.ui.components.WeekCalendarView
 import org.yatt.app.util.TimeUtils
+import org.yatt.app.viewmodel.TimerUiState
 import org.yatt.app.viewmodel.TimerViewModel
 import java.time.Duration
 import java.time.Instant
@@ -63,8 +68,9 @@ import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.delay
 
-private enum class ViewMode { CALENDAR, LIST }
+private enum class MainTab { TIMER, CALENDAR, LIST }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     timerViewModel: TimerViewModel,
@@ -72,10 +78,10 @@ fun HomeScreen(
 ) {
     val uiState by timerViewModel.uiState.collectAsState()
     val preferences by timerViewModel.preferencesFlow.collectAsState(
-        initial = UserPreferences("dd/MM/yyyy", "24h", 0, "http://10.0.2.2:3000")
+        initial = UserPreferences("dd/MM/yyyy", "24h", 0, "https://time-server.command.pimenta.pt/")
     )
 
-    var viewMode by remember { mutableStateOf(ViewMode.CALENDAR) }
+    var selectedTab by remember { mutableStateOf(MainTab.TIMER) }
     var filterTag by remember { mutableStateOf("") }
     var newTag by remember { mutableStateOf("") }
     var selectedTimer by remember { mutableStateOf<TimerEntity?>(null) }
@@ -85,6 +91,7 @@ fun HomeScreen(
 
     val runningTimer = uiState.timers.firstOrNull { it.endTime == null }
     var now by remember { mutableStateOf(Instant.now()) }
+    val context = LocalContext.current
 
     LaunchedEffect(runningTimer?.id) {
         while (true) {
@@ -181,19 +188,39 @@ fun HomeScreen(
                     }
                 }
             )
+        },
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = selectedTab == MainTab.TIMER,
+                    onClick = { selectedTab = MainTab.TIMER },
+                    icon = { Icon(Icons.Outlined.Schedule, contentDescription = "Timer") },
+                    label = { Text("Timer") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == MainTab.CALENDAR,
+                    onClick = { selectedTab = MainTab.CALENDAR },
+                    icon = { Icon(Icons.Outlined.CalendarMonth, contentDescription = "Calendar") },
+                    label = { Text("Calendar") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == MainTab.LIST,
+                    onClick = { selectedTab = MainTab.LIST },
+                    icon = { Icon(Icons.Outlined.List, contentDescription = "List") },
+                    label = { Text("List") }
+                )
+            }
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            RunningTimerCard(
+        when (selectedTab) {
+            MainTab.TIMER -> TimerTabContent(
+                modifier = Modifier.padding(padding),
                 runningTimer = runningTimer,
-                elapsed = currentElapsed,
+                currentElapsed = currentElapsed,
+                newTag = newTag,
+                onNewTagChange = { newTag = it },
+                uiState = uiState,
+                now = now,
                 preferences = preferences,
                 onEditElapsed = {
                     elapsedInput = TimeUtils.formatDuration(currentElapsed)
@@ -210,7 +237,7 @@ fun HomeScreen(
                         zoneId
                     ).toLocalTime()
                     TimePickerDialog(
-                        LocalContext.current,
+                        context,
                         { _, hour, minute ->
                             val newStart = TimeUtils.buildDateTime(startDate, LocalTime.of(hour, minute))
                             timerViewModel.editRunningStartTime(timer.id, newStart)
@@ -219,70 +246,114 @@ fun HomeScreen(
                         startTime.minute,
                         preferences.timeFormat == "24h"
                     ).show()
-                }
+                },
+                timerViewModel = timerViewModel,
+                onShowManualEntry = { showManualEntry = true }
             )
-
-            TagInputField(
-                value = newTag,
-                onValueChange = { newTag = it },
-                tags = uiState.tags,
-                placeholder = if (runningTimer != null) "Change tag" else "Tag (optional)",
-                onSubmit = {
-                    if (runningTimer != null) {
-                        timerViewModel.updateRunningTag(runningTimer.id, newTag)
-                    } else {
-                        timerViewModel.startTimer(newTag)
-                    }
-                }
-            )
-
-            Button(
-                onClick = { timerViewModel.toggleTimer(runningTimer, newTag) },
-                modifier = Modifier.fillMaxWidth()
+            MainTab.CALENDAR -> Box(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize()
             ) {
-                Text(if (runningTimer == null) "Start" else "Stop")
-            }
-
-            Button(
-                onClick = { showManualEntry = true },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Add past entry")
-            }
-
-            if (!uiState.error.isNullOrBlank()) {
-                Text(uiState.error ?: "", color = MaterialTheme.colorScheme.error)
-            }
-
-            StatsRow(timers = uiState.timers, now = now, preferences = preferences)
-
-            ViewToggle(
-                viewMode = viewMode,
-                onChange = { viewMode = it }
-            )
-
-            if (viewMode == ViewMode.CALENDAR) {
                 WeekCalendarView(
                     timers = uiState.timers,
                     now = now,
                     preferences = preferences,
                     onSelect = { selectedTimer = it }
                 )
-            } else {
+            }
+            MainTab.LIST -> Column(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize()
+            ) {
                 FilterRow(
                     tags = uiState.tags,
                     selectedTag = filterTag,
                     onTagSelected = { filterTag = it }
                 )
-                TimerListView(
-                    timers = uiState.timers,
-                    filterTag = filterTag,
-                    now = now,
-                    preferences = preferences,
-                    onSelect = { selectedTimer = it }
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TimerListView(
+                        timers = uiState.timers,
+                        filterTag = filterTag,
+                        now = now,
+                        preferences = preferences,
+                        onSelect = { selectedTimer = it }
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun TimerTabContent(
+    modifier: Modifier = Modifier,
+    runningTimer: TimerEntity?,
+    currentElapsed: Duration,
+    newTag: String,
+    onNewTagChange: (String) -> Unit,
+    uiState: TimerUiState,
+    now: Instant,
+    preferences: UserPreferences,
+    onEditElapsed: () -> Unit,
+    onEditStartTime: (TimerEntity) -> Unit,
+    timerViewModel: TimerViewModel,
+    onShowManualEntry: () -> Unit
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        RunningTimerCard(
+            runningTimer = runningTimer,
+            elapsed = currentElapsed,
+            preferences = preferences,
+            onEditElapsed = onEditElapsed,
+            onEditStartTime = onEditStartTime
+        )
+
+        TagInputField(
+            value = newTag,
+            onValueChange = onNewTagChange,
+            tags = uiState.tags,
+            placeholder = if (runningTimer != null) "Change tag" else "Tag (optional)",
+            onSubmit = {
+                if (runningTimer != null) {
+                    timerViewModel.updateRunningTag(runningTimer.id, newTag)
+                } else {
+                    timerViewModel.startTimer(newTag)
+                }
+            }
+        )
+
+        Button(
+            onClick = { timerViewModel.toggleTimer(runningTimer, newTag) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (runningTimer == null) "Start" else "Stop")
+        }
+
+        Button(
+            onClick = onShowManualEntry,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Add past entry")
+        }
+
+        if (!uiState.error.isNullOrBlank()) {
+            Text(uiState.error ?: "", color = MaterialTheme.colorScheme.error)
+        }
+
+        StatsRow(timers = uiState.timers, now = now, preferences = preferences)
     }
 }
 
@@ -339,17 +410,20 @@ private fun StatsRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        StatCard(label = "Today", value = TimeUtils.formatDuration(todayTotal))
-        StatCard(label = "This week", value = TimeUtils.formatDuration(weekTotal))
+        StatCard(modifier = Modifier.fillMaxWidth(0.5f), label = "Today", value = TimeUtils.formatDuration(todayTotal))
+        StatCard(modifier = Modifier.fillMaxWidth(0.5f), label = "This week", value = TimeUtils.formatDuration(weekTotal))
     }
 }
 
 @Composable
-private fun StatCard(label: String, value: String) {
+private fun StatCard(
+    modifier: Modifier = Modifier,
+    label: String,
+    value: String
+) {
     Column(
-        modifier = Modifier
-            .padding(8.dp)
-            .weight(1f),
+        modifier = modifier
+            .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(value, style = MaterialTheme.typography.titleMedium)
@@ -381,7 +455,7 @@ private fun FilterRow(
                 .fillMaxWidth()
                 .menuAnchor()
         )
-        ExposedDropdownMenu(
+        DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
@@ -433,27 +507,6 @@ private fun TimerListView(
                     onClick = { onSelect(timer) }
                 )
             }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ViewToggle(viewMode: ViewMode, onChange: (ViewMode) -> Unit) {
-    SingleChoiceSegmentedButtonRow {
-        SegmentedButton(
-            selected = viewMode == ViewMode.CALENDAR,
-            onClick = { onChange(ViewMode.CALENDAR) },
-            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
-        ) {
-            Text("Calendar")
-        }
-        SegmentedButton(
-            selected = viewMode == ViewMode.LIST,
-            onClick = { onChange(ViewMode.LIST) },
-            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
-        ) {
-            Text("List")
         }
     }
 }

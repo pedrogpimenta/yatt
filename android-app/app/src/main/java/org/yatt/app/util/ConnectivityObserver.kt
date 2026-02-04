@@ -8,6 +8,8 @@ import android.net.NetworkRequest
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
 class ConnectivityObserver(context: Context) {
     private val connectivityManager =
@@ -29,10 +31,17 @@ class ConnectivityObserver(context: Context) {
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()
-        connectivityManager.registerNetworkCallback(request, callback)
+        // registerNetworkCallback can throw or behave badly if not on main thread on some devices
+        withContext(Dispatchers.Main.immediate) {
+            connectivityManager.registerNetworkCallback(request, callback)
+        }
 
         awaitClose {
-            connectivityManager.unregisterNetworkCallback(callback)
+            try {
+                connectivityManager.unregisterNetworkCallback(callback)
+            } catch (e: IllegalArgumentException) {
+                // Already unregistered - ignore
+            }
         }
     }
 

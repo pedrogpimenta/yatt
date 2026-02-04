@@ -15,6 +15,7 @@ import org.yatt.app.data.remote.ApiService
 import org.yatt.app.notifications.NotificationController
 import org.yatt.app.util.ConnectivityObserver
 import org.yatt.app.util.TimeUtils
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -116,7 +117,10 @@ class TimerRepository(
                 )
                 timerDao.saveTimer(updated)
                 if (updated.endTime == null) {
-                    notificationController.updateTimer(updated)
+                    val timers = timerDao.getTimers()
+                    val dayStartHour = settingsStore.preferencesFlow.first().dayStartHour
+                    val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, updated.id)
+                    notificationController.updateTimer(updated, totalWithout)
                 } else if (existing.endTime == null) {
                     notificationController.stopTimer()
                 }
@@ -131,7 +135,10 @@ class TimerRepository(
                     val updated = apiService.updateTimer(id, startTime, endTime, tag)
                     timerDao.saveTimer(updated)
                     if (updated.endTime == null) {
-                        notificationController.updateTimer(updated)
+                        val timers = timerDao.getTimers()
+                        val dayStartHour = settingsStore.preferencesFlow.first().dayStartHour
+                        val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, updated.id)
+                        notificationController.updateTimer(updated, totalWithout)
                     } else {
                         notificationController.stopTimer()
                     }
@@ -379,10 +386,46 @@ class TimerRepository(
         return value
     }
 
-    private fun notifyRunning(timer: TimerEntity) {
+    private suspend fun notifyRunning(timer: TimerEntity) {
         if (timer.endTime == null) {
-            notificationController.startTimer(timer)
+            val timers = timerDao.getTimers()
+            val dayStartHour = settingsStore.preferencesFlow.first().dayStartHour
+            val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, timer.id)
+            notificationController.startTimer(timer, totalWithout)
         }
+    }
+
+    /** Call when timer list changes to keep ongoing notification in sync (e.g. after app start or refresh). */
+    fun syncNotificationWithRunningTimer(timers: List<TimerEntity>, dayStartHour: Int) {
+        val running = timers.firstOrNull { it.endTime == null }
+        if (running != null) {
+            val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, running.id)
+            notificationController.startTimer(running, totalWithout)
+        } else {
+            notificationController.stopTimer()
+        }
+    }
+
+    private fun computeTodayTotalSecondsWithoutCurrent(timers: List<TimerEntity>, dayStartHour: Int, runningTimerId: String): Long {
+        val now = Instant.now()
+        val todayStart = TimeUtils.effectiveTodayStart(dayStartHour)
+        val todayEnd = todayStart.plus(Duration.ofDays(1))
+        var totalToday = Duration.ZERO
+        var runningElapsed = Duration.ZERO
+        timers.forEach { timer ->
+            val timerStart = TimeUtils.parseInstant(timer.startTime)
+            val timerEnd = timer.endTime?.let { TimeUtils.parseInstant(it) } ?: now
+            val overlapStart = maxOf(timerStart, todayStart)
+            val overlapEnd = minOf(timerEnd, todayEnd)
+            if (overlapEnd.isAfter(overlapStart)) {
+                val overlap = Duration.between(overlapStart, overlapEnd)
+                totalToday = totalToday.plus(overlap)
+                if (timer.id == runningTimerId) {
+                    runningElapsed = Duration.between(timerStart, now)
+                }
+            }
+        }
+        return (totalToday.seconds - runningElapsed.seconds).coerceAtLeast(0)
     }
 
     object SyncType {

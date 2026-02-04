@@ -24,8 +24,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.icons.Icons
-import androidx.compose.material3.icons.outlined.Close
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -43,6 +45,7 @@ import org.yatt.app.data.UserPreferences
 import org.yatt.app.viewmodel.SettingsViewModel
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     settingsViewModel: SettingsViewModel,
@@ -50,7 +53,7 @@ fun SettingsScreen(
     onOpenDeviceSync: () -> Unit
 ) {
     val preferences by settingsViewModel.preferencesFlow.collectAsState(
-        initial = UserPreferences("dd/MM/yyyy", "24h", 0, "http://10.0.2.2:3000")
+        initial = UserPreferences("dd/MM/yyyy", "24h", 0, "https://time-server.command.pimenta.pt/")
     )
     val token by settingsViewModel.authTokenFlow.collectAsState(initial = null)
     val localMode by settingsViewModel.localModeFlow.collectAsState(initial = false)
@@ -294,11 +297,11 @@ private fun FormatSelector(
                 .fillMaxWidth()
                 .menuAnchor()
         )
-        ExposedDropdownMenu(
+        DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            options.forEach { option ->
+            for (option in options) {
                 DropdownMenuItem(
                     text = { Text(option) },
                     onClick = {

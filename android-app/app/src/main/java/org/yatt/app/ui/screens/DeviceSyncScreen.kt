@@ -19,8 +19,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.icons.Icons
-import androidx.compose.material3.icons.outlined.Close
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -37,10 +37,12 @@ import android.graphics.Bitmap
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import org.yatt.app.viewmodel.DeviceSyncViewModel
+import androidx.compose.material3.ExperimentalMaterial3Api
 
 private enum class SyncType { ONLINE, OFFLINE }
 private enum class SyncMode { CHOOSE, SHARE, JOIN, EXPORT, IMPORT }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceSyncScreen(
     deviceSyncViewModel: DeviceSyncViewModel,

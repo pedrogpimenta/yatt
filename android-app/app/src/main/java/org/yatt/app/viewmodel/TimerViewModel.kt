@@ -37,21 +37,33 @@ class TimerViewModel(
     private val error = MutableStateFlow<String?>(null)
     private val syncing = MutableStateFlow(false)
 
+    private data class _Combined(
+        val timers: List<TimerEntity>,
+        val tags: List<String>,
+        val isOnline: Boolean,
+        val pendingSyncCount: Int,
+        val syncing: Boolean
+    )
+
     val uiState: StateFlow<TimerUiState> = combine(
-        timerRepository.timersFlow,
-        tags,
-        timerRepository.isOnlineFlow,
-        timerRepository.pendingSyncCountFlow,
-        syncing,
+        combine(
+            timerRepository.timersFlow,
+            tags,
+            timerRepository.isOnlineFlow,
+            timerRepository.pendingSyncCountFlow,
+            syncing
+        ) { timers, tags, isOnline, pendingSyncCount, syncing ->
+            _Combined(timers, tags, isOnline, pendingSyncCount, syncing)
+        },
         loading,
         error
-    ) { timers, tags, online, pending, syncing, loading, error ->
+    ) { combined, loading, error ->
         TimerUiState(
-            timers = timers,
-            tags = tags,
-            isOnline = online,
-            pendingSyncCount = pending,
-            syncing = syncing,
+            timers = combined.timers,
+            tags = combined.tags,
+            isOnline = combined.isOnline,
+            pendingSyncCount = combined.pendingSyncCount,
+            syncing = combined.syncing,
             loading = loading,
             error = error
         )
@@ -76,6 +88,16 @@ class TimerViewModel(
                 } else {
                     webSocket.disconnect()
                 }
+            }
+        }
+        viewModelScope.launch {
+            combine(
+                timerRepository.timersFlow,
+                settingsStore.preferencesFlow
+            ) { timers, prefs ->
+                timers to prefs.dayStartHour
+            }.collect { (timers, dayStartHour) ->
+                timerRepository.syncNotificationWithRunningTimer(timers, dayStartHour)
             }
         }
     }
@@ -178,7 +200,7 @@ class TimerViewModel(
             error.value = null
             try {
                 timerRepository.createTimer(
-                    tag = tag?.trim().ifBlank { null },
+                    tag = tag?.trim()?.takeIf { it.isNotBlank() },
                     startTime = startTime.toString(),
                     endTime = endTime.toString()
                 )

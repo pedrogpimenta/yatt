@@ -39,7 +39,7 @@ class SettingsStore(private val context: Context) {
             dateFormat = prefs[Keys.dateFormat] ?: "dd/MM/yyyy",
             timeFormat = prefs[Keys.timeFormat] ?: "24h",
             dayStartHour = prefs[Keys.dayStartHour] ?: 0,
-            apiBaseUrl = prefs[Keys.apiBaseUrl] ?: "http://10.0.2.2:3000"
+            apiBaseUrl = prefs[Keys.apiBaseUrl] ?: "https://time-server.command.pimenta.pt/"
         )
     }
 
