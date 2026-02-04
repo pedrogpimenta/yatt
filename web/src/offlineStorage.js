@@ -1,7 +1,7 @@
 // IndexedDB-based offline storage for timers
 
 const DB_NAME = 'yatt-offline'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 let db = null
 
@@ -29,6 +29,12 @@ function openDB() {
         timerStore.createIndex('localId', 'localId', { unique: false })
       }
 
+      // Store for cached projects
+      if (!database.objectStoreNames.contains('projects')) {
+        const projectStore = database.createObjectStore('projects', { keyPath: 'id' })
+        projectStore.createIndex('name', 'name', { unique: false })
+      }
+
       // Store for pending sync operations
       if (!database.objectStoreNames.contains('syncQueue')) {
         database.createObjectStore('syncQueue', { keyPath: 'id', autoIncrement: true })
@@ -45,6 +51,10 @@ function openDB() {
 // Generate a temporary local ID for offline-created timers
 export function generateLocalId() {
   return `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+export function generateProjectId() {
+  return `local_project_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 }
 
 // Check if an ID is a local (offline) ID
@@ -162,6 +172,86 @@ export async function updateTimerId(localId, serverId, serverData) {
   })
 }
 
+// Project operations
+export async function getAllProjects() {
+  const database = await openDB()
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(['projects'], 'readonly')
+    const store = transaction.objectStore('projects')
+    const request = store.getAll()
+
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => resolve(request.result || [])
+  })
+}
+
+export async function getProject(id) {
+  const database = await openDB()
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(['projects'], 'readonly')
+    const store = transaction.objectStore('projects')
+    const request = store.get(id)
+
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => resolve(request.result)
+  })
+}
+
+export async function saveProject(project) {
+  const database = await openDB()
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(['projects'], 'readwrite')
+    const store = transaction.objectStore('projects')
+    const request = store.put(project)
+
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => resolve(project)
+  })
+}
+
+export async function saveProjects(projects) {
+  const database = await openDB()
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(['projects'], 'readwrite')
+    const store = transaction.objectStore('projects')
+
+    const clearRequest = store.clear()
+
+    clearRequest.onsuccess = () => {
+      let completed = 0
+      if (projects.length === 0) {
+        resolve()
+        return
+      }
+
+      for (const project of projects) {
+        const request = store.put(project)
+        request.onsuccess = () => {
+          completed++
+          if (completed === projects.length) {
+            resolve()
+          }
+        }
+        request.onerror = () => reject(request.error)
+      }
+    }
+
+    clearRequest.onerror = () => reject(clearRequest.error)
+  })
+}
+
+export async function deleteProject(id) {
+  const database = await openDB()
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(['projects'], 'readwrite')
+    const store = transaction.objectStore('projects')
+    const request = store.delete(id)
+
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => resolve()
+  })
+}
+
 // Sync queue operations
 export async function addToSyncQueue(operation) {
   const database = await openDB()
@@ -253,9 +343,10 @@ export async function getMeta(key) {
 export async function clearAllData() {
   const database = await openDB()
   return new Promise((resolve, reject) => {
-    const transaction = database.transaction(['timers', 'syncQueue', 'meta'], 'readwrite')
+    const transaction = database.transaction(['timers', 'projects', 'syncQueue', 'meta'], 'readwrite')
     
     const timersClear = transaction.objectStore('timers').clear()
+    const projectsClear = transaction.objectStore('projects').clear()
     const syncQueueClear = transaction.objectStore('syncQueue').clear()
     const metaClear = transaction.objectStore('meta').clear()
     

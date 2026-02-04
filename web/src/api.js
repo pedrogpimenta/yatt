@@ -390,6 +390,54 @@ export const api = {
     })
   },
 
+  async getProjects() {
+    if (isLocalMode()) {
+      return await offlineStorage.getAllProjects()
+    }
+
+    const result = await tryRequest('/projects')
+
+    if (result !== null) {
+      await offlineStorage.saveProjects(result)
+      return result
+    }
+
+    return await offlineStorage.getAllProjects()
+  },
+
+  async createProject(data = {}) {
+    const payload = {
+      name: data.name,
+      type: data.type || null,
+      clientName: data.clientName || null,
+      clientId: data.clientId || null
+    }
+
+    if (isLocalMode()) {
+      const localProject = {
+        id: offlineStorage.generateProjectId(),
+        name: payload.name,
+        type: payload.type,
+        client_id: null,
+        client_name: payload.clientName || null
+      }
+      await offlineStorage.saveProject(localProject)
+      return localProject
+    }
+
+    const result = await tryRequest('/projects', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+
+    if (result !== null) {
+      await offlineStorage.saveProject(result)
+      return result
+    }
+
+    throw new Error('Offline - unable to create project')
+  },
+
   changePassword(currentPassword, newPassword) {
     return request('/auth/change-password', {
       method: 'POST',

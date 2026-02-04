@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { api } from '../api.js'
 import { 
   preferences, 
@@ -18,6 +18,8 @@ import {
 import TimerItem from './TimerItem.vue'
 import WeeklyCalendar from './WeeklyCalendar.vue'
 import TagInput from './TagInput.vue'
+import ProjectSelector from './ProjectSelector.vue'
+import { formatProjectLabel } from '../projects.js'
 
 const emit = defineEmits(['openSettings'])
 
@@ -26,6 +28,8 @@ const loading = ref(true)
 const error = ref('')
 const newTag = ref('')
 const tags = ref([])
+const projects = ref([])
+const newProjectId = ref(null)
 const viewMode = ref('calendar') // 'list' or 'calendar'
 const selectedTimer = ref(null)
 const filterTag = ref('') // '' means all tags
@@ -69,7 +73,8 @@ const manualEntry = ref({
   startTime: '',
   endDate: '',
   endTime: '',
-  tag: ''
+  tag: '',
+  projectId: null
 })
 const manualEndDateSynced = ref(true)
 const manualStartDatePicker = ref(null)
@@ -101,7 +106,8 @@ function openManualEntry() {
     startTime: getDefaultTime(9),
     endDate: formattedDate,
     endTime: getDefaultTime(10),
-    tag: ''
+    tag: '',
+    projectId: newProjectId.value
   }
   hiddenManualStartDate.value = isoDate
   hiddenManualEndDate.value = isoDate
@@ -167,7 +173,7 @@ function onManualEndDateInput() {
 async function saveManualEntry() {
   error.value = ''
   
-  const { startDate, startTime, endDate, endTime, tag } = manualEntry.value
+  const { startDate, startTime, endDate, endTime, tag, projectId } = manualEntry.value
   
   if (!startDate || !startTime || !endDate || !endTime) {
     error.value = 'Please fill in all required fields'
@@ -210,7 +216,8 @@ async function saveManualEntry() {
     await api.createTimer({
       start_time: startDateTime.toISOString(),
       end_time: endDateTime.toISOString(),
-      tag: tag || null
+      tag: tag || null,
+      project_id: projectId || null
     })
     
     // Refresh tags if it's a new one
@@ -238,6 +245,17 @@ const runningTimer = computed(() => {
 })
 
 const isRunning = computed(() => !!runningTimer.value)
+
+function findProjectById(id) {
+  if (id === null || id === undefined) return null
+  return projects.value.find((project) => String(project.id) === String(id)) || null
+}
+
+const runningProjectLabel = computed(() => {
+  if (!runningTimer.value) return ''
+  const project = findProjectById(runningTimer.value.project_id)
+  return project ? formatProjectLabel(project) : ''
+})
 
 const currentElapsed = ref(0)
 const isEditingElapsed = ref(false)
@@ -390,6 +408,7 @@ async function syncPendingChanges() {
     if (result.synced > 0) {
       await fetchTimers()
       await fetchTags()
+      await fetchProjects()
     }
   } catch (err) {
     error.value = 'Sync failed: ' + err.message
@@ -538,6 +557,7 @@ async function fetchTimers() {
     // Sync tag input with running timer's tag
     if (runningTimer.value) {
       newTag.value = runningTimer.value.tag || ''
+      newProjectId.value = runningTimer.value.project_id || null
     }
   } catch (err) {
     error.value = err.message
@@ -554,6 +574,27 @@ async function fetchTags() {
   }
 }
 
+async function fetchProjects() {
+  try {
+    projects.value = await api.getProjects()
+  } catch (err) {
+    console.error('Failed to fetch projects:', err)
+  }
+}
+
+async function handleCreateProject(payload) {
+  const created = await api.createProject(payload)
+  if (created) {
+    const existingIndex = projects.value.findIndex((project) => String(project.id) === String(created.id))
+    if (existingIndex === -1) {
+      projects.value = [...projects.value, created]
+    } else {
+      projects.value.splice(existingIndex, 1, created)
+    }
+  }
+  return created
+}
+
 async function toggleTimer() {
   error.value = ''
   try {
@@ -561,7 +602,10 @@ async function toggleTimer() {
       await api.stopTimer(runningTimer.value.id)
       newTag.value = ''
     } else {
-      await api.createTimer({ tag: newTag.value || null })
+      await api.createTimer({
+        tag: newTag.value || null,
+        project_id: newProjectId.value || null
+      })
       // Refresh tags after creating a timer with a potentially new tag
       if (newTag.value && !tags.value.includes(newTag.value)) {
         fetchTags()
@@ -589,6 +633,28 @@ async function updateRunningTag() {
     error.value = err.message
   }
 }
+
+async function updateRunningProject() {
+  if (!runningTimer.value) return
+  error.value = ''
+  try {
+    await api.updateTimer(runningTimer.value.id, { project_id: newProjectId.value || null })
+    await fetchTimers()
+    await updatePendingSyncCount()
+  } catch (err) {
+    error.value = err.message
+  }
+}
+
+watch(newProjectId, async (newValue) => {
+  if (!runningTimer.value) return
+  const currentProjectId = runningTimer.value.project_id ?? null
+  const normalizedNewValue = newValue ?? null
+  if (String(currentProjectId) === String(normalizedNewValue)) {
+    return
+  }
+  await updateRunningProject()
+})
 
 async function handleUpdate(id, data) {
   error.value = ''
@@ -627,6 +693,7 @@ function closeSelectedTimer() {
 onMounted(() => {
   fetchTimers()
   fetchTags()
+  fetchProjects()
   updatePendingSyncCount()
   tickInterval = setInterval(() => {
     updateCurrentElapsed()
@@ -715,6 +782,7 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="current-tag" v-if="runningTimer?.tag">{{ runningTimer.tag }}</div>
+            <div class="current-project" v-if="runningProjectLabel">{{ runningProjectLabel }}</div>
             <div class="current-status" v-if="!isRunning">Stopped</div>
             <div class="started-at" v-if="isRunning && !isEditingStartTime" @click="startEditStartTime">
               Started {{ displayStartTime }}
@@ -733,6 +801,16 @@ onUnmounted(() => {
               <button @click="saveEditStartTime" class="btn-icon btn-icon-primary" title="Save">✓</button>
             </div>
           </div>
+        </div>
+
+        <!-- Project Selector -->
+        <div class="project-input-section">
+          <ProjectSelector
+            v-model="newProjectId"
+            :projects="projects"
+            :onCreate="handleCreateProject"
+            :placeholder="isRunning ? 'Change project...' : 'Project (optional)'"
+          />
         </div>
 
         <!-- Tag Input -->
@@ -864,6 +942,8 @@ onUnmounted(() => {
               v-for="timer in group.timers" 
               :key="`${timer.id}-${preferences.dateFormat}-${preferences.timeFormat}`" 
               :timer="timer"
+              :projects="projects"
+              :onCreateProject="handleCreateProject"
               @update="handleUpdate"
               @delete="handleDelete"
             />
@@ -879,6 +959,8 @@ onUnmounted(() => {
         <TimerItem 
           :key="`selected-${selectedTimer?.id}-${preferences.dateFormat}-${preferences.timeFormat}`"
           :timer="selectedTimer"
+          :projects="projects"
+          :onCreateProject="handleCreateProject"
           @update="handleUpdate"
           @delete="handleDelete"
         />
@@ -958,6 +1040,16 @@ onUnmounted(() => {
               v-model="manualEntry.tag"
               :tags="tags"
               placeholder="Add a tag..."
+            />
+          </div>
+
+          <div class="form-group">
+            <label>Project (optional)</label>
+            <ProjectSelector
+              v-model="manualEntry.projectId"
+              :projects="projects"
+              :onCreate="handleCreateProject"
+              placeholder="Select a project..."
             />
           </div>
           
@@ -1182,6 +1274,12 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
+.current-project {
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
 .current-status {
   margin-top: 0.25rem;
   font-size: 0.75rem;
@@ -1268,6 +1366,11 @@ onUnmounted(() => {
 
 /* Tag Input */
 .tag-input-section {
+  width: 100%;
+}
+
+/* Project Selector */
+.project-input-section {
   width: 100%;
 }
 
