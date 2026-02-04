@@ -6,7 +6,7 @@ A self-hosted time tracking application with a web frontend, Android app, and KD
 
 - **API** (`api/`): Node.js/Express REST API with SQLite database and WebSocket support
 - **Web** (`web/`): Vue 3 web application
-- **Android App** (`android-app/`): Capacitor-based Android application
+- **Android App** (`android-app/`): Native Android application (Kotlin + Jetpack Compose)
 - **KDE Widget** (`kde-widget/`): Plasma widget for KDE desktop
 
 ## Prerequisites
@@ -146,59 +146,21 @@ docker compose restart api
 
 ### Development Setup
 
-```bash
-cd android-app
-npm install
-```
+Open the `android-app/` folder in Android Studio and let Gradle sync.
 
 #### Configure API URL
 
-Edit `src/api.js` and set your API server URL:
+Open Settings in the app and set the API base URL.
 
-```javascript
-const API_URL = 'http://your-server:3000'
-```
-
-For local development with an emulator, use `10.0.2.2` instead of `localhost`:
-
-```javascript
-const API_URL = 'http://10.0.2.2:3000'
-```
-
-#### First-Time Setup
-
-```bash
-npm run setup
-```
-
-This builds the web assets, adds the Android platform, and syncs Capacitor.
-
-#### Development
-
-```bash
-# Build web assets
-npm run build
-
-# Sync with Android project
-npm run cap:sync
-
-# Open in Android Studio
-npm run cap:open
-```
+For local development with an emulator, use `http://10.0.2.2:3000` instead of `localhost`.
 
 #### Running on Device/Emulator
 
 From Android Studio, run the app on your device or emulator.
 
-Or via command line:
-
-```bash
-npm run cap:run
-```
-
 ### Building a Release APK
 
-1. Open the project in Android Studio: `npm run cap:open`
+1. Open the project in Android Studio
 2. Go to Build > Generate Signed Bundle/APK
 3. Follow the wizard to create a signed APK
 

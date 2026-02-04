@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">YATT</string>
+    <string name="title_activity_main">YATT</string>
+    <string name="package_name">org.yatt.app</string>
+    <string name="custom_url_scheme">org.yatt.app</string>
+</resources>

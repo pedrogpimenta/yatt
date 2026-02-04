@@ -1,5 +1,36 @@
-node_modules
-dist
-android
-.gradle
+# Build outputs
+build/
+.gradle/
+*.apk
+*.aab
+*.ap_
+*.aar
+*.dex
+
+# Node (Capacitor / tooling)
+node_modules/
+dist/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+local.properties
+captures/
+
+# Native build
+.externalNativeBuild/
+.cxx/
+
+# Logs & misc
 *.log
+.DS_Store
+
+# Kotlin
+*.class
+.kotlin/
+
+# Proguard
+proguard/
+
+# Profiling
+*.hprof
