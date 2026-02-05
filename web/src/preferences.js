@@ -5,7 +5,10 @@ const STORAGE_KEY = 'yatt_preferences'
 const defaults = {
   dateFormat: 'dd/mm/yyyy', // 'dd/mm/yyyy' or 'mm/dd/yyyy'
   timeFormat: '24h',        // '24h' or '12h'
-  dayStartHour: 0           // 0-23, hour when a new "day" starts for time tracking
+  dayStartHour: 0,          // 0-23, hour when a new "day" starts for time tracking
+  dailyGoalEnabled: false,
+  defaultDailyGoalHours: 8,
+  includeWeekendGoals: false
 }
 
 function loadPreferences() {

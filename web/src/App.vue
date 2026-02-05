@@ -16,8 +16,19 @@ async function loadUserPreferences() {
   }
   try {
     const userPreferences = await api.getUserPreferences()
-    if (userPreferences && typeof userPreferences.dayStartHour === 'number') {
-      preferences.dayStartHour = userPreferences.dayStartHour
+    if (userPreferences) {
+      if (typeof userPreferences.dayStartHour === 'number') {
+        preferences.dayStartHour = userPreferences.dayStartHour
+      }
+      if (typeof userPreferences.dailyGoalEnabled === 'boolean') {
+        preferences.dailyGoalEnabled = userPreferences.dailyGoalEnabled
+      }
+      if (typeof userPreferences.defaultDailyGoalHours === 'number') {
+        preferences.defaultDailyGoalHours = userPreferences.defaultDailyGoalHours
+      }
+      if (typeof userPreferences.includeWeekendGoals === 'boolean') {
+        preferences.includeWeekendGoals = userPreferences.includeWeekendGoals
+      }
     }
   } catch (err) {
     console.error('Failed to load user preferences:', err)

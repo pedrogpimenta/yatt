@@ -139,6 +139,50 @@ fun SettingsScreen(
                 }
             )
 
+            Text("Daily time goal", style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Enable daily goal", style = MaterialTheme.typography.bodyMedium)
+                androidx.compose.material3.Switch(
+                    checked = preferences.dailyGoalEnabled,
+                    onCheckedChange = { settingsViewModel.setDailyGoalEnabled(it) }
+                )
+            }
+            if (preferences.dailyGoalEnabled) {
+                var localHours by remember { mutableStateOf(preferences.defaultDailyGoalHours.toString()) }
+                LaunchedEffect(preferences.defaultDailyGoalHours) {
+                    localHours = preferences.defaultDailyGoalHours.toString()
+                }
+                OutlinedTextField(
+                    value = localHours,
+                    onValueChange = { s ->
+                        localHours = s
+                        s.toDoubleOrNull()?.takeIf { it in 0.0..24.0 }?.let {
+                            settingsViewModel.setDefaultDailyGoalHours(it)
+                        }
+                    },
+                    label = { Text("Default goal (hours per day)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Include Saturday & Sunday", style = MaterialTheme.typography.bodyMedium)
+                    androidx.compose.material3.Switch(
+                        checked = preferences.includeWeekendGoals,
+                        onCheckedChange = { settingsViewModel.setIncludeWeekendGoals(it) }
+                    )
+                }
+            }
+            Text(
+                "Show remaining time in Today/This week. Set a different goal for specific days in the calendar or list view.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             Divider()
 
             Text("Projects", style = MaterialTheme.typography.titleMedium)

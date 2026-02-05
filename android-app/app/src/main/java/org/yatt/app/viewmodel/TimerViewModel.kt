@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.yatt.app.data.SettingsStore
@@ -12,7 +13,10 @@ import org.yatt.app.data.local.TimerEntity
 import org.yatt.app.data.remote.TimerWebSocket
 import org.yatt.app.data.repository.ProjectsRepository
 import org.yatt.app.data.repository.TimerRepository
+import org.yatt.app.util.TimeUtils
 import java.time.Instant
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 data class TimerUiState(
     val timers: List<TimerEntity> = emptyList(),
@@ -39,6 +43,8 @@ class TimerViewModel(
     private val loading = MutableStateFlow(true)
     private val error = MutableStateFlow<String?>(null)
     private val syncing = MutableStateFlow(false)
+    private val dailyGoals = MutableStateFlow<Map<String, Double>>(emptyMap())
+    val dailyGoalsFlow: StateFlow<Map<String, Double>> = dailyGoals
 
     private data class _Combined(
         val timers: List<TimerEntity>,
@@ -101,6 +107,45 @@ class TimerViewModel(
                 timers to prefs.dayStartHour
             }.collect { (timers, dayStartHour) ->
                 timerRepository.syncNotificationWithRunningTimer(timers, dayStartHour)
+            }
+        }
+        viewModelScope.launch {
+            settingsStore.preferencesFlow.collect { prefs ->
+                if (prefs.dailyGoalEnabled) fetchDailyGoals(prefs.dayStartHour)
+                else dailyGoals.value = emptyMap()
+            }
+        }
+    }
+
+    private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+
+    fun fetchDailyGoals(dayStartHour: Int) {
+        viewModelScope.launch {
+            try {
+                val weekStart = TimeUtils.effectiveWeekStart(dayStartHour)
+                val from = LocalDate.ofInstant(weekStart, java.time.ZoneId.systemDefault()).format(dateFormatter)
+                val to = LocalDate.ofInstant(weekStart.plus(java.time.Duration.ofDays(6)), java.time.ZoneId.systemDefault()).format(dateFormatter)
+                dailyGoals.value = timerRepository.getDailyGoals(from, to)
+            } catch (_: Exception) {
+                dailyGoals.value = emptyMap()
+            }
+        }
+    }
+
+    fun setDailyGoal(date: String, hours: Double) {
+        viewModelScope.launch {
+            timerRepository.setDailyGoal(date, hours)
+            settingsStore.preferencesFlow.first().let { prefs ->
+                if (prefs.dailyGoalEnabled) fetchDailyGoals(prefs.dayStartHour)
+            }
+        }
+    }
+
+    fun clearDailyGoal(date: String) {
+        viewModelScope.launch {
+            timerRepository.clearDailyGoal(date)
+            settingsStore.preferencesFlow.first().let { prefs ->
+                if (prefs.dailyGoalEnabled) fetchDailyGoals(prefs.dayStartHour)
             }
         }
     }

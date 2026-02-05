@@ -97,33 +97,149 @@ router.get('/me', authMiddleware, (req, res) => {
 // Get user preferences (protected)
 router.get('/preferences', authMiddleware, (req, res) => {
   try {
-    const user = db.prepare('SELECT day_start_hour FROM users WHERE id = ?').get(req.userId);
+    const user = db.prepare(
+      'SELECT day_start_hour, daily_goal_enabled, default_daily_goal_hours, include_weekend_goals FROM users WHERE id = ?'
+    ).get(req.userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    res.json({ dayStartHour: user.day_start_hour ?? 0 });
+    res.json({
+      dayStartHour: user.day_start_hour ?? 0,
+      dailyGoalEnabled: !!(user.daily_goal_enabled ?? 0),
+      defaultDailyGoalHours: Number(user.default_daily_goal_hours ?? 8),
+      includeWeekendGoals: !!(user.include_weekend_goals ?? 0)
+    });
   } catch (err) {
     console.error('Get preferences error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
+function normalizeDefaultDailyGoalHours(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  if (Number.isNaN(parsed) || parsed < 0 || parsed > 24) return null;
+  return parsed;
+}
+
 // Update user preferences (protected)
 router.patch('/preferences', authMiddleware, (req, res) => {
   try {
-    const dayStartHour = normalizeDayStartHour(req.body?.dayStartHour);
-    if (dayStartHour === null) {
-      return res.status(400).json({ error: 'dayStartHour must be an integer between 0 and 23' });
+    const updates = [];
+    const params = [];
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'dayStartHour')) {
+      const dayStartHour = normalizeDayStartHour(req.body.dayStartHour);
+      if (dayStartHour === null) {
+        return res.status(400).json({ error: 'dayStartHour must be an integer between 0 and 23' });
+      }
+      updates.push('day_start_hour = ?');
+      params.push(dayStartHour);
     }
 
-    const result = db.prepare('UPDATE users SET day_start_hour = ? WHERE id = ?').run(dayStartHour, req.userId);
+    if (typeof req.body?.dailyGoalEnabled === 'boolean') {
+      updates.push('daily_goal_enabled = ?');
+      params.push(req.body.dailyGoalEnabled ? 1 : 0);
+    }
+    const defaultHours = normalizeDefaultDailyGoalHours(req.body?.defaultDailyGoalHours);
+    if (defaultHours !== null) {
+      updates.push('default_daily_goal_hours = ?');
+      params.push(defaultHours);
+    }
+    if (typeof req.body?.includeWeekendGoals === 'boolean') {
+      updates.push('include_weekend_goals = ?');
+      params.push(req.body.includeWeekendGoals ? 1 : 0);
+    }
+
+    if (updates.length === 0) {
+      const user = db.prepare(
+        'SELECT day_start_hour, daily_goal_enabled, default_daily_goal_hours, include_weekend_goals FROM users WHERE id = ?'
+      ).get(req.userId);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      return res.json({
+        dayStartHour: user.day_start_hour ?? 0,
+        dailyGoalEnabled: !!(user.daily_goal_enabled ?? 0),
+        defaultDailyGoalHours: Number(user.default_daily_goal_hours ?? 8),
+        includeWeekendGoals: !!(user.include_weekend_goals ?? 0)
+      });
+    }
+
+    params.push(req.userId);
+    const result = db.prepare(
+      `UPDATE users SET ${updates.join(', ')} WHERE id = ?`
+    ).run(...params);
     if (result.changes === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({ dayStartHour });
+    const user = db.prepare(
+      'SELECT day_start_hour, daily_goal_enabled, default_daily_goal_hours, include_weekend_goals FROM users WHERE id = ?'
+    ).get(req.userId);
+    res.json({
+      dayStartHour: user.day_start_hour ?? 0,
+      dailyGoalEnabled: !!(user.daily_goal_enabled ?? 0),
+      defaultDailyGoalHours: Number(user.default_daily_goal_hours ?? 8),
+      includeWeekendGoals: !!(user.include_weekend_goals ?? 0)
+    });
   } catch (err) {
     console.error('Update preferences error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get daily goal overrides for a date range (protected)
+// Query params: from=YYYY-MM-DD, to=YYYY-MM-DD
+router.get('/daily-goals', authMiddleware, (req, res) => {
+  try {
+    const from = req.query.from;
+    const to = req.query.to;
+    if (!from || !to) {
+      return res.status(400).json({ error: 'Query params from and to (YYYY-MM-DD) are required' });
+    }
+    const rows = db.prepare(
+      'SELECT date, hours FROM daily_goals WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date'
+    ).all(req.userId, from, to);
+    const goals = {};
+    rows.forEach((row) => { goals[row.date] = row.hours; });
+    res.json(goals);
+  } catch (err) {
+    console.error('Get daily goals error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Set daily goal for a specific date (protected)
+router.put('/daily-goals/:date', authMiddleware, (req, res) => {
+  try {
+    const dateStr = req.params.date;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return res.status(400).json({ error: 'Date must be YYYY-MM-DD' });
+    }
+    const hours = normalizeDefaultDailyGoalHours(req.body?.hours);
+    if (hours === null) {
+      return res.status(400).json({ error: 'hours must be a number between 0 and 24' });
+    }
+    db.prepare(
+      'INSERT INTO daily_goals (user_id, date, hours) VALUES (?, ?, ?) ON CONFLICT(user_id, date) DO UPDATE SET hours = excluded.hours'
+    ).run(req.userId, dateStr, hours);
+    res.json({ date: dateStr, hours });
+  } catch (err) {
+    console.error('Set daily goal error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Clear daily goal override for a date (protected)
+router.delete('/daily-goals/:date', authMiddleware, (req, res) => {
+  try {
+    const dateStr = req.params.date;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return res.status(400).json({ error: 'Date must be YYYY-MM-DD' });
+    }
+    db.prepare('DELETE FROM daily_goals WHERE user_id = ? AND date = ?').run(req.userId, dateStr);
+    res.status(204).send();
+  } catch (err) {
+    console.error('Delete daily goal error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });

@@ -79,11 +79,14 @@ import org.yatt.app.ui.components.WeekCalendarView
 import org.yatt.app.util.TimeUtils
 import org.yatt.app.viewmodel.TimerUiState
 import org.yatt.app.viewmodel.TimerViewModel
+import java.time.DayOfWeek
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 
 private enum class MainTab { TIMER, CALENDAR, LIST }
@@ -108,7 +111,10 @@ fun HomeScreen(
     var showManualEntry by remember { mutableStateOf(false) }
     var showEditElapsed by remember { mutableStateOf(false) }
     var elapsedInput by remember { mutableStateOf("") }
+    var dayGoalDateKey by remember { mutableStateOf<String?>(null) }
+    var dayGoalLabel by remember { mutableStateOf("") }
     val projects by timerViewModel.projectsFlow.collectAsState(initial = emptyList())
+    val dailyGoalsList by timerViewModel.dailyGoalsFlow.collectAsState(initial = emptyMap())
 
     val runningTimer = uiState.timers.firstOrNull { it.endTime == null }
     var now by remember { mutableStateOf(Instant.now()) }
@@ -315,10 +321,31 @@ fun HomeScreen(
                         filterTag = filterTag,
                         now = now,
                         preferences = preferences,
-                        onSelect = { selectedTimer = it }
+                        dailyGoalEnabled = preferences.dailyGoalEnabled,
+                        dailyGoals = dailyGoalsList,
+                        onSelect = { selectedTimer = it },
+                        onDayGoalClick = { dateKey, label ->
+                            dayGoalDateKey = dateKey
+                            dayGoalLabel = label
+                        }
                     )
                 }
             }
+        }
+
+        dayGoalDateKey?.let { dateKey ->
+            DayGoalDialog(
+                dateKey = dateKey,
+                label = dayGoalLabel,
+                currentHours = dailyGoalsList[dateKey] ?: preferences.defaultDailyGoalHours,
+                defaultHours = preferences.defaultDailyGoalHours,
+                onSave = { hours ->
+                    if (hours != null) timerViewModel.setDailyGoal(dateKey, hours)
+                    else timerViewModel.clearDailyGoal(dateKey)
+                    dayGoalDateKey = null
+                },
+                onDismiss = { dayGoalDateKey = null }
+            )
         }
     }
 }
@@ -402,7 +429,8 @@ private fun TimerTabContent(
         }
 
         // Day and week totals
-        StatsRow(timers = uiState.timers, now = now, preferences = preferences)
+        val dailyGoals by timerViewModel.dailyGoalsFlow.collectAsState(initial = emptyMap())
+        StatsRow(timers = uiState.timers, now = now, preferences = preferences, dailyGoals = dailyGoals)
 
         // Tag, project, description – edit current timer when running
         TagInputField(
@@ -534,17 +562,44 @@ private fun RunningTimerCard(
     }
 }
 
+private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+
 @Composable
 private fun StatsRow(
     timers: List<TimerEntity>,
     now: Instant,
-    preferences: UserPreferences
+    preferences: UserPreferences,
+    dailyGoals: Map<String, Double> = emptyMap()
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val zoneId = ZoneId.systemDefault()
     val todayTotal = computeTotal(timers, now, preferences.dayStartHour, true)
     val weekTotal = computeTotal(timers, now, preferences.dayStartHour, false)
-    val todayText = TimeUtils.formatDuration(todayTotal)
-    val weekText = TimeUtils.formatDuration(weekTotal)
+    val todayDate = TimeUtils.effectiveDate(now, preferences.dayStartHour)
+    val todayKey = todayDate.format(dateFormatter)
+    val dayOfWeek = todayDate.dayOfWeek
+    val todayGoalHours = if (!preferences.dailyGoalEnabled) null
+    else if (!preferences.includeWeekendGoals && (dayOfWeek == DayOfWeek.SATURDAY || dayOfWeek == DayOfWeek.SUNDAY)) null
+    else (dailyGoals[todayKey] ?: preferences.defaultDailyGoalHours)
+    val weekGoalHours = if (!preferences.dailyGoalEnabled) null else run {
+        val weekStart = TimeUtils.effectiveWeekStart(preferences.dayStartHour)
+        val startDate = LocalDate.ofInstant(weekStart, zoneId)
+        var sum = 0.0
+        for (i in 0..6) {
+            val d = startDate.plusDays(i.toLong())
+            if (!preferences.includeWeekendGoals && (d.dayOfWeek == DayOfWeek.SATURDAY || d.dayOfWeek == DayOfWeek.SUNDAY)) continue
+            sum += dailyGoals[d.format(dateFormatter)] ?: preferences.defaultDailyGoalHours
+        }
+        sum
+    }
+    val todayRemaining = todayGoalHours?.let { h ->
+        Duration.ofSeconds((h * 3600).toLong()).minus(todayTotal).takeIf { !it.isNegative }
+    }
+    val weekRemaining = weekGoalHours?.let { h ->
+        Duration.ofSeconds((h * 3600).toLong()).minus(weekTotal).takeIf { !it.isNegative }
+    }
+    val todayText = TimeUtils.formatDuration(todayTotal) + (todayRemaining?.let { " (${TimeUtils.formatDuration(it)} left)" } ?: "")
+    val weekText = TimeUtils.formatDuration(weekTotal) + (weekRemaining?.let { " (${TimeUtils.formatDuration(it)} left)" } ?: "")
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -714,7 +769,10 @@ private fun TimerListView(
     filterTag: String,
     now: Instant,
     preferences: UserPreferences,
-    onSelect: (TimerEntity) -> Unit
+    dailyGoalEnabled: Boolean,
+    dailyGoals: Map<String, Double>,
+    onSelect: (TimerEntity) -> Unit,
+    onDayGoalClick: (String, String) -> Unit
 ) {
     val filtered = if (filterTag.isBlank()) timers else timers.filter { it.tag == filterTag }
     val groups = groupTimersByDay(filtered, preferences, now)
@@ -724,10 +782,21 @@ private fun TimerListView(
             Text("No timers yet", style = MaterialTheme.typography.bodyMedium)
         }
         groups.forEach { group ->
-            Text(
-                text = "${group.label} - ${TimeUtils.formatDuration(group.total)}",
-                style = MaterialTheme.typography.labelLarge
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "${group.label} - ${TimeUtils.formatDuration(group.total)}",
+                    style = MaterialTheme.typography.labelLarge
+                )
+                if (dailyGoalEnabled) {
+                    TextButton(onClick = { onDayGoalClick(group.dateKey, group.label) }) {
+                        Text("Goal", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
             group.timers.forEach { timer ->
                 TimerListItem(
                     timer = timer,
@@ -738,6 +807,47 @@ private fun TimerListView(
             }
         }
     }
+}
+
+@Composable
+private fun DayGoalDialog(
+    dateKey: String,
+    label: String,
+    currentHours: Double,
+    defaultHours: Double,
+    onSave: (Double?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var hoursText by remember { mutableStateOf(if (currentHours != defaultHours) currentHours.toString() else "") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Goal for $label") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Hours (leave empty to use default: $defaultHours)", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(
+                    value = hoursText,
+                    onValueChange = { hoursText = it },
+                    label = { Text("Hours") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val trimmed = hoursText.trim()
+                if (trimmed.isEmpty()) onSave(null)
+                else trimmed.toDoubleOrNull()?.takeIf { it in 0.0..24.0 }?.let { onSave(it) }
+            }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
@@ -765,6 +875,7 @@ private fun SyncStatusAction(
 
 private data class DayGroup(
     val label: String,
+    val dateKey: String,
     val timers: List<TimerEntity>,
     val total: Duration
 )
@@ -782,8 +893,12 @@ private fun groupTimersByDay(
     }
 
     return groups.map { (label, timers) ->
+        val firstStart = TimeUtils.parseInstant(timers.first().startTime)
+        val effectiveDate = TimeUtils.effectiveDate(firstStart, preferences.dayStartHour)
+        val dateKey = effectiveDate.format(dateFormatter)
         DayGroup(
             label = label,
+            dateKey = dateKey,
             timers = timers,
             total = computeGroupTotal(timers, now, preferences.dayStartHour)
         )

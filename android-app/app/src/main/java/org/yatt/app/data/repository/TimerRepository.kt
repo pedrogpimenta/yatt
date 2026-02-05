@@ -468,6 +468,19 @@ class TimerRepository(
         return (totalToday.seconds - runningElapsed.seconds).coerceAtLeast(0)
     }
 
+    suspend fun getDailyGoals(from: String, to: String): Map<String, Double> = withContext(Dispatchers.IO) {
+        if (isLocalMode()) return@withContext emptyMap()
+        runCatching { apiService.getDailyGoals(from, to) }.getOrElse { emptyMap() }
+    }
+
+    suspend fun setDailyGoal(date: String, hours: Double) = withContext(Dispatchers.IO) {
+        if (!isLocalMode() && isOnline()) apiService.setDailyGoal(date, hours)
+    }
+
+    suspend fun clearDailyGoal(date: String) = withContext(Dispatchers.IO) {
+        if (!isLocalMode() && isOnline()) apiService.clearDailyGoal(date)
+    }
+
     object SyncType {
         const val CREATE = "create"
         const val UPDATE = "update"

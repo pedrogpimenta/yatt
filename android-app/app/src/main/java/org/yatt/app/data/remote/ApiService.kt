@@ -49,14 +49,44 @@ class ApiService(private val settingsStore: SettingsStore) {
         )
     }
 
-    suspend fun getPreferences(): Int {
-        val response = requestJson("auth/preferences", "GET")
-        return response.optInt("dayStartHour", 0)
+    suspend fun getPreferences(): JSONObject {
+        return requestJson("auth/preferences", "GET")
     }
 
-    suspend fun updatePreferences(dayStartHour: Int) {
-        val payload = JSONObject().put("dayStartHour", dayStartHour)
-        requestJson("auth/preferences", "PATCH", payload)
+    suspend fun updatePreferences(
+        dayStartHour: Int? = null,
+        dailyGoalEnabled: Boolean? = null,
+        defaultDailyGoalHours: Double? = null,
+        includeWeekendGoals: Boolean? = null
+    ) {
+        val payload = JSONObject()
+        dayStartHour?.let { payload.put("dayStartHour", it) }
+        dailyGoalEnabled?.let { payload.put("dailyGoalEnabled", it) }
+        defaultDailyGoalHours?.let { payload.put("defaultDailyGoalHours", it) }
+        includeWeekendGoals?.let { payload.put("includeWeekendGoals", it) }
+        if (payload.length() > 0) {
+            requestJson("auth/preferences", "PATCH", payload)
+        }
+    }
+
+    suspend fun getDailyGoals(from: String, to: String): Map<String, Double> {
+        val response = requestJson("auth/daily-goals?from=${java.net.URLEncoder.encode(from, "UTF-8")}&to=${java.net.URLEncoder.encode(to, "UTF-8")}", "GET")
+        val map = mutableMapOf<String, Double>()
+        val keys = response.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            map[key] = response.optDouble(key, 8.0)
+        }
+        return map
+    }
+
+    suspend fun setDailyGoal(date: String, hours: Double) {
+        val payload = JSONObject().put("hours", hours)
+        requestJson("auth/daily-goals/$date", "PUT", payload)
+    }
+
+    suspend fun clearDailyGoal(date: String) {
+        execute("auth/daily-goals/$date", "DELETE", null)
     }
 
     suspend fun changePassword(currentPassword: String, newPassword: String) {

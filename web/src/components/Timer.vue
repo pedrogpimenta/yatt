@@ -15,6 +15,14 @@ import {
   getEffectiveTodayStart,
   getEffectiveWeekStart
 } from '../preferences.js'
+
+function toDateKey(date) {
+  const d = typeof date === 'string' ? new Date(date) : date
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
 import TimerItem from './TimerItem.vue'
 import WeeklyCalendar from './WeeklyCalendar.vue'
 import TagInput from './TagInput.vue'
@@ -36,6 +44,7 @@ const viewMode = ref('calendar') // 'list' or 'calendar'
 const selectedTimer = ref(null)
 const selectedTimerFromCalendar = ref(false)
 const filterTag = ref('') // '' means all tags
+const dailyGoals = ref({}) // date key -> hours
 
 // Modal stack to track open modals (for Escape key handling)
 const modalStack = ref([])
@@ -60,6 +69,8 @@ function closeTopModal() {
     closeManualEntry()
   } else if (topModal === 'selectedTimer') {
     closeSelectedTimer()
+  } else if (topModal === 'dayGoal') {
+    closeDayGoalModal()
   }
 }
 
@@ -477,6 +488,50 @@ const weekTotal = computed(() => {
   return total
 })
 
+// Daily goal: today and week goals + remaining
+const effectiveTodayDate = computed(() => {
+  const _ = preferences.dayStartHour
+  return getEffectiveDate(new Date())
+})
+const todayDateKey = computed(() => toDateKey(effectiveTodayDate.value))
+const weekStartDate = computed(() => getEffectiveWeekStart())
+const todayGoalHours = computed(() => {
+  if (!preferences.dailyGoalEnabled) return null
+  const d = effectiveTodayDate.value
+  const day = d.getDay() // 0 Sun, 6 Sat
+  if (!preferences.includeWeekendGoals && (day === 0 || day === 6)) return null
+  return dailyGoals.value[todayDateKey.value] ?? preferences.defaultDailyGoalHours ?? 8
+})
+const weekGoalHours = computed(() => {
+  if (!preferences.dailyGoalEnabled) return null
+  const includeWeekend = preferences.includeWeekendGoals
+  let sum = 0
+  const start = new Date(weekStartDate.value)
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start)
+    d.setDate(d.getDate() + i)
+    if (!includeWeekend) {
+      const day = d.getDay()
+      if (day === 0 || day === 6) continue
+    }
+    const key = toDateKey(d)
+    sum += dailyGoals.value[key] ?? preferences.defaultDailyGoalHours ?? 8
+  }
+  return sum
+})
+const todayRemainingMs = computed(() => {
+  const goal = todayGoalHours.value
+  if (goal == null) return null
+  const goalMs = goal * 3600000
+  return Math.max(0, goalMs - todayTotal.value)
+})
+const weekRemainingMs = computed(() => {
+  const goal = weekGoalHours.value
+  if (goal == null) return null
+  const goalMs = goal * 3600000
+  return Math.max(0, goalMs - weekTotal.value)
+})
+
 const filteredTimers = computed(() => {
   if (!filterTag.value) {
     return timers.value
@@ -598,11 +653,83 @@ async function fetchClients() {
   }
 }
 
+async function fetchDailyGoals() {
+  if (!preferences.dailyGoalEnabled) {
+    dailyGoals.value = {}
+    return
+  }
+  const start = getEffectiveWeekStart()
+  const from = toDateKey(start)
+  const toDate = new Date(start)
+  toDate.setDate(toDate.getDate() + 6)
+  const to = toDateKey(toDate)
+  try {
+    dailyGoals.value = await api.getDailyGoals(from, to) || {}
+  } catch (err) {
+    dailyGoals.value = {}
+  }
+}
+
+const showDayGoalModal = ref(false)
+const dayGoalDate = ref(null)
+const dayGoalHoursInput = ref('')
+const dayGoalError = ref('')
+
+function openDayGoalModal(date) {
+  if (!preferences.dailyGoalEnabled) return
+  dayGoalDate.value = date
+  const key = toDateKey(date)
+  const override = dailyGoals.value[key]
+  dayGoalHoursInput.value = override != null ? String(override) : ''
+  showDayGoalModal.value = true
+  pushModal('dayGoal')
+}
+
+function closeDayGoalModal() {
+  showDayGoalModal.value = false
+  dayGoalDate.value = null
+  dayGoalError.value = ''
+  popModal('dayGoal')
+}
+
+async function saveDayGoal() {
+  if (!dayGoalDate.value) return
+  dayGoalError.value = ''
+  const raw = String(dayGoalHoursInput.value ?? '').trim()
+  if (raw === '') {
+    try {
+      await api.clearDailyGoal(dayGoalDate.value)
+      const key = toDateKey(dayGoalDate.value)
+      const next = { ...dailyGoals.value }
+      delete next[key]
+      dailyGoals.value = next
+      closeDayGoalModal()
+    } catch (err) {
+      dayGoalError.value = err.message || 'Failed to clear goal'
+    }
+    return
+  }
+  const hours = parseFloat(raw)
+  if (isNaN(hours) || hours < 0 || hours > 24) {
+    dayGoalError.value = 'Enter a number between 0 and 24'
+    return
+  }
+  try {
+    await api.setDailyGoal(dayGoalDate.value, hours)
+    const key = toDateKey(dayGoalDate.value)
+    dailyGoals.value = { ...dailyGoals.value, [key]: hours }
+    closeDayGoalModal()
+  } catch (err) {
+    dayGoalError.value = err.message || 'Failed to save goal'
+  }
+}
+
 async function refetch() {
   await fetchTimers()
   await fetchProjects()
   await fetchClients()
   await fetchTags()
+  await fetchDailyGoals()
 }
 
 defineExpose({ refetch })
@@ -737,11 +864,16 @@ function closeSelectedTimer() {
   popModal('selectedTimer')
 }
 
+watch(() => [preferences.dailyGoalEnabled, preferences.includeWeekendGoals], () => {
+  fetchDailyGoals()
+}, { immediate: false })
+
 onMounted(() => {
   fetchTimers()
   fetchTags()
   fetchProjects()
   fetchClients()
+  fetchDailyGoals()
   updatePendingSyncCount()
   tickInterval = setInterval(() => {
     updateCurrentElapsed()
@@ -917,10 +1049,16 @@ onUnmounted(() => {
         <div class="stats">
           <div class="stat">
             <span class="stat-value">{{ formatDuration(todayTotal) }}</span>
+            <span v-if="todayRemainingMs !== null" class="stat-remaining">
+              {{ todayRemainingMs > 0 ? formatDuration(todayRemainingMs) + ' left' : 'goal reached' }}
+            </span>
             <span class="stat-label">Today</span>
           </div>
           <div class="stat">
             <span class="stat-value">{{ formatDuration(weekTotal) }}</span>
+            <span v-if="weekRemainingMs !== null" class="stat-remaining">
+              {{ weekRemainingMs > 0 ? formatDuration(weekRemainingMs) + ' left' : 'goal reached' }}
+            </span>
             <span class="stat-label">This Week</span>
           </div>
         </div>
@@ -968,7 +1106,13 @@ onUnmounted(() => {
           :timers="timers"
           :projects="projects"
           :currentElapsed="currentElapsed"
+          :daily-goal-enabled="preferences.dailyGoalEnabled"
+          :day-goal-for-date="(d) => {
+            if (!preferences.includeWeekendGoals && (d.getDay() === 0 || d.getDay() === 6)) return null
+            return dailyGoals[toDateKey(d)] ?? preferences.defaultDailyGoalHours
+          }"
           @select="selectTimerFromCalendar"
+          @day-goal-click="openDayGoalModal"
         />
       </div>
 
@@ -998,9 +1142,18 @@ onUnmounted(() => {
         <p v-else-if="filteredTimers.length === 0" class="empty">{{ filterTag ? 'No timers with this tag' : 'No timers yet' }}</p>
         <div class="timer-list">
           <template v-for="group in timersByDay" :key="group.date.toISOString()">
-            <div class="day-separator">
+            <div class="day-separator" :class="{ 'day-separator-goal': preferences.dailyGoalEnabled }">
               <span class="day-label">{{ group.label }}</span>
               <span class="day-total">{{ formatDuration(group.total) }}</span>
+              <button
+                v-if="preferences.dailyGoalEnabled"
+                type="button"
+                class="day-goal-btn"
+                title="Set goal for this day"
+                @click="openDayGoalModal(group.date)"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              </button>
             </div>
             <TimerItem 
               v-for="timer in group.timers" 
@@ -1034,6 +1187,33 @@ onUnmounted(() => {
           @cancel="closeSelectedTimer"
           @open-create-form="fetchClients"
         />
+      </div>
+    </div>
+
+    <!-- Day goal modal (Escape closes via handleKeydown / closeTopModal) -->
+    <div class="timer-modal-overlay" v-if="showDayGoalModal && dayGoalDate" @click.self="closeDayGoalModal">
+      <div class="timer-modal day-goal-modal">
+        <button class="close-btn" @click="closeDayGoalModal">&times;</button>
+        <h3 class="modal-title">Goal for {{ formatDateLabel(dayGoalDate) }}</h3>
+        <form @submit.prevent="saveDayGoal" class="day-goal-form">
+          <div class="form-group">
+            <label>Hours (leave empty to use default)</label>
+            <input
+              v-model="dayGoalHoursInput"
+              type="number"
+              min="0"
+              max="24"
+              step="0.5"
+              class="day-goal-input"
+              :placeholder="'Default: ' + preferences.defaultDailyGoalHours"
+            />
+          </div>
+          <p v-if="dayGoalError" class="form-error">{{ dayGoalError }}</p>
+          <div class="form-actions">
+            <button type="button" class="btn-secondary" @click="closeDayGoalModal">Cancel</button>
+            <button type="submit" class="btn-primary">Save</button>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -1599,6 +1779,13 @@ onUnmounted(() => {
   margin-top: 0.25rem;
 }
 
+.stat-remaining {
+  display: block;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  margin-top: 0.125rem;
+}
+
 .error {
   color: var(--danger-color);
   text-align: center;
@@ -1767,6 +1954,35 @@ onUnmounted(() => {
   color: var(--text-secondary);
 }
 
+.day-separator-goal {
+  padding-right: 2rem;
+}
+
+.day-goal-btn {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0.25rem;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.day-goal-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--accent-color);
+}
+
+.day-separator {
+  position: relative;
+}
+
 .day-separator:first-child {
   margin-top: 0;
 }
@@ -1887,6 +2103,43 @@ onUnmounted(() => {
 .form-group input[type="text"]:focus {
   outline: none;
   border-color: var(--accent-color);
+}
+
+/* Day goal modal – input matches sidebar/project/tag inputs */
+.day-goal-modal .day-goal-form {
+  margin-top: 1rem;
+}
+.day-goal-modal .day-goal-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.day-goal-modal .day-goal-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+.day-goal-modal .day-goal-input::placeholder {
+  color: var(--text-muted);
+}
+.day-goal-modal .form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+.day-goal-modal .form-actions .btn-primary {
+  background: var(--accent-color);
+  border: none;
+  color: #fff;
+}
+.day-goal-modal .form-actions .btn-primary:hover {
+  background: var(--accent-hover);
 }
 
 .datetime-inputs {

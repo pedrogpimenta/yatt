@@ -40,10 +40,13 @@ class SettingsViewModel(
             try {
                 val profile = authRepository.getMe()
                 uiState.value = uiState.value.copy(userProfile = profile, loading = false)
-                // Sync day start from server (e.g. changed on another device)
+                // Sync preferences from server (e.g. changed on another device)
                 try {
-                    val dayStartHour = authRepository.getPreferences()
-                    settingsStore.setDayStartHour(dayStartHour)
+                    val prefs = authRepository.getPreferences()
+                    if (prefs.has("dayStartHour")) settingsStore.setDayStartHour(prefs.getInt("dayStartHour"))
+                    if (prefs.has("dailyGoalEnabled")) settingsStore.setDailyGoalEnabled(prefs.getBoolean("dailyGoalEnabled"))
+                    if (prefs.has("defaultDailyGoalHours")) settingsStore.setDefaultDailyGoalHours(prefs.getDouble("defaultDailyGoalHours"))
+                    if (prefs.has("includeWeekendGoals")) settingsStore.setIncludeWeekendGoals(prefs.getBoolean("includeWeekendGoals"))
                 } catch (_: Exception) { /* keep local value */ }
             } catch (ex: Exception) {
                 uiState.value = uiState.value.copy(loading = false, error = ex.message)
@@ -87,10 +90,37 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsStore.setDayStartHour(value)
             try {
-                authRepository.updatePreferences(value)
+                authRepository.updatePreferences(dayStartHour = value)
             } catch (_: Exception) {
                 // Local-only or offline: value is already saved locally
             }
+        }
+    }
+
+    fun setDailyGoalEnabled(value: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setDailyGoalEnabled(value)
+            try {
+                authRepository.updatePreferences(dailyGoalEnabled = value)
+            } catch (_: Exception) { }
+        }
+    }
+
+    fun setDefaultDailyGoalHours(value: Double) {
+        viewModelScope.launch {
+            settingsStore.setDefaultDailyGoalHours(value)
+            try {
+                authRepository.updatePreferences(defaultDailyGoalHours = value)
+            } catch (_: Exception) { }
+        }
+    }
+
+    fun setIncludeWeekendGoals(value: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setIncludeWeekendGoals(value)
+            try {
+                authRepository.updatePreferences(includeWeekendGoals = value)
+            } catch (_: Exception) { }
         }
     }
 

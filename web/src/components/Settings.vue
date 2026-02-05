@@ -73,18 +73,26 @@ async function fetchUser() {
 }
 
 watch(() => preferences.dayStartHour, async (newValue, oldValue) => {
-  if (isLocalMode.value) {
-    return
-  }
-  if (newValue === oldValue || typeof newValue !== 'number') {
-    return
-  }
+  if (isLocalMode.value) return
+  if (newValue === oldValue || typeof newValue !== 'number') return
   try {
     await api.updateUserPreferences({ dayStartHour: newValue })
   } catch (err) {
     error.value = err.message
   }
 })
+
+function saveGoalPreferences() {
+  if (isLocalMode.value) return
+  api.updateUserPreferences({
+    dailyGoalEnabled: preferences.dailyGoalEnabled,
+    defaultDailyGoalHours: preferences.defaultDailyGoalHours,
+    includeWeekendGoals: preferences.includeWeekendGoals
+  }).catch((err) => { error.value = err.message })
+}
+watch(() => preferences.dailyGoalEnabled, () => saveGoalPreferences())
+watch(() => preferences.defaultDailyGoalHours, () => saveGoalPreferences())
+watch(() => preferences.includeWeekendGoals, () => saveGoalPreferences())
 
 function handleSynced() {
   showSyncModal.value = false
@@ -375,6 +383,38 @@ onUnmounted(() => {
           </div>
           <p class="preference-hint">
             Set when your "day" starts for time tracking. Useful if you often work past midnight.
+          </p>
+
+          <h3 class="subsection-title">Daily time goal</h3>
+          <div class="preference-row">
+            <span class="label">Enable daily goal</span>
+            <label class="toggle-label">
+              <input type="checkbox" v-model="preferences.dailyGoalEnabled" class="toggle-checkbox" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <template v-if="preferences.dailyGoalEnabled">
+            <div class="preference-row">
+              <span class="label">Default goal (hours per day)</span>
+              <input
+                v-model.number="preferences.defaultDailyGoalHours"
+                type="number"
+                min="0"
+                max="24"
+                step="0.5"
+                class="preference-number"
+              />
+            </div>
+            <div class="preference-row">
+              <span class="label">Include Saturday & Sunday</span>
+              <label class="toggle-label">
+                <input type="checkbox" v-model="preferences.includeWeekendGoals" class="toggle-checkbox" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </template>
+          <p class="preference-hint">
+            Show remaining time in Today/This week. You can set a different goal for specific days in the calendar or list view.
           </p>
         </section>
 
@@ -712,6 +752,72 @@ onUnmounted(() => {
   color: var(--text-muted);
   margin-top: 0.75rem;
   line-height: 1.4;
+}
+
+.subsection-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.preference-number {
+  width: 80px;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.toggle-label {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.toggle-checkbox {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg-tertiary);
+  border-radius: 24px;
+  transition: 0.2s;
+  border: 1px solid var(--border-color);
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background: var(--text-primary);
+  border-radius: 50%;
+  transition: 0.2s;
+}
+
+.toggle-checkbox:checked + .toggle-slider {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+.toggle-checkbox:checked + .toggle-slider::before {
+  transform: translateX(20px);
+  background: #fff;
 }
 
 .token-container {

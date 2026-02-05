@@ -30,6 +30,14 @@ PlasmoidItem {
     
     property bool wsConnected: false
     
+    // Daily goal (from API)
+    property bool dailyGoalEnabled: false
+    property real defaultDailyGoalHours: 8
+    property bool includeWeekendGoals: false
+    property var dailyGoals: ({})
+    property int todayRemainingMs: -1
+    property int weekRemainingMs: -1
+    
     property var availableTags: []
     property string newTag: ""
     property var availableProjects: []
@@ -376,6 +384,7 @@ PlasmoidItem {
         baseWeek = wkTotal
         todayTotal = dayTotal + (isRunning ? currentElapsed : 0)
         weekTotal = wkTotal + (isRunning ? currentElapsed : 0)
+        if (dailyGoalEnabled) updateGoalRemaining()
     }
     
     // Sync timeout safety - reset isSyncing if it takes too long
@@ -649,6 +658,7 @@ PlasmoidItem {
                 // Update totals in real-time
                 todayTotal = baseToday + currentElapsed
                 weekTotal = baseWeek + currentElapsed
+                if (dailyGoalEnabled) updateGoalRemaining()
             }
         }
     }
@@ -670,6 +680,74 @@ PlasmoidItem {
     toolTipMainText: isRunning ? "Timer Running" : "No Timer"
     toolTipSubText: isRunning ? formatDuration(currentElapsed) : "Click to open"
 
+    function toDateKey(date) {
+        var y = date.getFullYear()
+        var m = String(date.getMonth() + 1).padStart(2, '0')
+        var d = String(date.getDate()).padStart(2, '0')
+        return y + "-" + m + "-" + d
+    }
+
+    function fetchPreferences() {
+        apiRequest("/auth/preferences", "GET", null, function(prefs) {
+            if (prefs && typeof prefs.dailyGoalEnabled === 'boolean') {
+                dailyGoalEnabled = prefs.dailyGoalEnabled
+                defaultDailyGoalHours = prefs.defaultDailyGoalHours != null ? Number(prefs.defaultDailyGoalHours) : 8
+                includeWeekendGoals = prefs.includeWeekendGoals === true
+            }
+            if (dailyGoalEnabled) fetchDailyGoals()
+        }, function() {})
+    }
+
+    function fetchDailyGoals() {
+        if (!dailyGoalEnabled) return
+        var now = new Date()
+        var day = now.getDay()
+        var mondayOffset = day === 0 ? -6 : 1 - day
+        var monday = new Date(now)
+        monday.setDate(now.getDate() + mondayOffset)
+        monday.setHours(0, 0, 0, 0)
+        var from = toDateKey(monday)
+        var toDate = new Date(monday)
+        toDate.setDate(toDate.getDate() + 6)
+        var to = toDateKey(toDate)
+        apiRequest("/auth/daily-goals?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to), "GET", null, function(goals) {
+            dailyGoals = goals && typeof goals === 'object' ? goals : {}
+            updateGoalRemaining()
+        }, function() { dailyGoals = {} })
+    }
+
+    function updateGoalRemaining() {
+        if (!dailyGoalEnabled) {
+            todayRemainingMs = -1
+            weekRemainingMs = -1
+            return
+        }
+        var now = new Date()
+        var todayKey = toDateKey(now)
+        var day = now.getDay()
+        var todayGoalHours = (includeWeekendGoals || (day !== 0 && day !== 6)) ? (dailyGoals[todayKey] != null ? dailyGoals[todayKey] : defaultDailyGoalHours) : 0
+        var todayGoalMs = todayGoalHours * 3600000
+        todayRemainingMs = todayGoalHours > 0 ? Math.max(0, todayGoalMs - todayTotal) : -1
+
+        var day2 = now.getDay()
+        var mondayOffset = day2 === 0 ? -6 : 1 - day2
+        var monday = new Date(now)
+        monday.setDate(now.getDate() + mondayOffset)
+        var weekGoalHours = 0
+        for (var i = 0; i < 7; i++) {
+            var d = new Date(monday)
+            d.setDate(d.getDate() + i)
+            if (!includeWeekendGoals) {
+                var dow = d.getDay()
+                if (dow === 0 || dow === 6) continue
+            }
+            var key = toDateKey(d)
+            weekGoalHours += dailyGoals[key] != null ? dailyGoals[key] : defaultDailyGoalHours
+        }
+        var weekGoalMs = weekGoalHours * 3600000
+        weekRemainingMs = Math.max(0, weekGoalMs - weekTotal)
+    }
+
     Component.onCompleted: {
         initDatabase()
         updatePendingSyncCount()
@@ -688,6 +766,7 @@ PlasmoidItem {
             fetchTags()
             fetchProjects()
             fetchClients()
+            fetchPreferences()
         }
     }
 

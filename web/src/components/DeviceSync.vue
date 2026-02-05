@@ -47,7 +47,10 @@ async function generateExport() {
       preferences: {
         dateFormat: preferences.dateFormat,
         timeFormat: preferences.timeFormat,
-        dayStartHour: preferences.dayStartHour
+        dayStartHour: preferences.dayStartHour,
+        dailyGoalEnabled: preferences.dailyGoalEnabled,
+        defaultDailyGoalHours: preferences.defaultDailyGoalHours,
+        includeWeekendGoals: preferences.includeWeekendGoals
       }
     }
     const data = JSON.stringify(payload)
@@ -104,6 +107,9 @@ async function handleImport() {
       if (prefs.dateFormat != null) preferences.dateFormat = prefs.dateFormat
       if (prefs.timeFormat != null) preferences.timeFormat = prefs.timeFormat
       if (prefs.dayStartHour != null) preferences.dayStartHour = prefs.dayStartHour
+      if (typeof prefs.dailyGoalEnabled === 'boolean') preferences.dailyGoalEnabled = prefs.dailyGoalEnabled
+      if (typeof prefs.defaultDailyGoalHours === 'number') preferences.defaultDailyGoalHours = prefs.defaultDailyGoalHours
+      if (typeof prefs.includeWeekendGoals === 'boolean') preferences.includeWeekendGoals = prefs.includeWeekendGoals
     }
     success.value = `Imported ${timers.length} timer(s)${projects.length ? `, ${projects.length} project(s)` : ''} successfully!`
     setTimeout(() => {
@@ -158,6 +164,9 @@ function startPolling() {
           if (status.preferences.dateFormat != null) preferences.dateFormat = status.preferences.dateFormat
           if (status.preferences.timeFormat != null) preferences.timeFormat = status.preferences.timeFormat
           if (status.preferences.dayStartHour != null) preferences.dayStartHour = status.preferences.dayStartHour
+          if (typeof status.preferences.dailyGoalEnabled === 'boolean') preferences.dailyGoalEnabled = status.preferences.dailyGoalEnabled
+          if (typeof status.preferences.defaultDailyGoalHours === 'number') preferences.defaultDailyGoalHours = status.preferences.defaultDailyGoalHours
+          if (typeof status.preferences.includeWeekendGoals === 'boolean') preferences.includeWeekendGoals = status.preferences.includeWeekendGoals
         }
         success.value = 'Sync complete! Timers have been merged.'
         stopPolling()
@@ -201,6 +210,9 @@ async function joinSession() {
         if (result.preferences.dateFormat != null) preferences.dateFormat = result.preferences.dateFormat
         if (result.preferences.timeFormat != null) preferences.timeFormat = result.preferences.timeFormat
         if (result.preferences.dayStartHour != null) preferences.dayStartHour = result.preferences.dayStartHour
+        if (typeof result.preferences.dailyGoalEnabled === 'boolean') preferences.dailyGoalEnabled = result.preferences.dailyGoalEnabled
+        if (typeof result.preferences.defaultDailyGoalHours === 'number') preferences.defaultDailyGoalHours = result.preferences.defaultDailyGoalHours
+        if (typeof result.preferences.includeWeekendGoals === 'boolean') preferences.includeWeekendGoals = result.preferences.includeWeekendGoals
       }
     }
     success.value = 'Sync complete! Timers have been merged.'

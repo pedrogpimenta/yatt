@@ -522,7 +522,9 @@ PlasmaExtras.Representation {
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: root.formatDuration(root.todayTotal)
+                        text: root.dailyGoalEnabled && root.todayRemainingMs >= 0
+                              ? (root.todayRemainingMs > 0 ? root.formatDuration(root.todayRemainingMs) + " left" : "goal reached")
+                              : root.formatDuration(root.todayTotal)
                         font.pointSize: 12
                         color: Kirigami.Theme.textColor
                     }
@@ -550,7 +552,9 @@ PlasmaExtras.Representation {
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: root.formatDuration(root.weekTotal)
+                        text: root.dailyGoalEnabled && root.weekRemainingMs >= 0
+                              ? (root.weekRemainingMs > 0 ? root.formatDuration(root.weekRemainingMs) + " left" : "goal reached")
+                              : root.formatDuration(root.weekTotal)
                         font.pointSize: 12
                         color: Kirigami.Theme.textColor
                     }

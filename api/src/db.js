@@ -14,7 +14,19 @@ db.exec(`
     email TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     day_start_hour INTEGER NOT NULL DEFAULT 0,
+    daily_goal_enabled INTEGER NOT NULL DEFAULT 0,
+    default_daily_goal_hours REAL NOT NULL DEFAULT 8,
+    include_weekend_goals INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS daily_goals (
+    user_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    hours REAL NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, date),
+    FOREIGN KEY (user_id) REFERENCES users(id)
   );
 
   CREATE TABLE IF NOT EXISTS clients (
@@ -53,6 +65,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_projects_client_id ON projects(client_id);
   CREATE INDEX IF NOT EXISTS idx_timers_user_id ON timers(user_id);
   CREATE INDEX IF NOT EXISTS idx_timers_start_time ON timers(start_time);
+  CREATE INDEX IF NOT EXISTS idx_daily_goals_user_id ON daily_goals(user_id);
 `);
 
 // Ensure new columns exist for existing databases
@@ -60,6 +73,18 @@ const userColumns = db.prepare(`PRAGMA table_info(users);`).all();
 const hasDayStartHour = userColumns.some((column) => column.name === 'day_start_hour');
 if (!hasDayStartHour) {
   db.exec('ALTER TABLE users ADD COLUMN day_start_hour INTEGER NOT NULL DEFAULT 0;');
+}
+const hasDailyGoalEnabled = userColumns.some((column) => column.name === 'daily_goal_enabled');
+if (!hasDailyGoalEnabled) {
+  db.exec('ALTER TABLE users ADD COLUMN daily_goal_enabled INTEGER NOT NULL DEFAULT 0;');
+}
+const hasDefaultDailyGoalHours = userColumns.some((column) => column.name === 'default_daily_goal_hours');
+if (!hasDefaultDailyGoalHours) {
+  db.exec('ALTER TABLE users ADD COLUMN default_daily_goal_hours REAL NOT NULL DEFAULT 8;');
+}
+const hasIncludeWeekendGoals = userColumns.some((column) => column.name === 'include_weekend_goals');
+if (!hasIncludeWeekendGoals) {
+  db.exec('ALTER TABLE users ADD COLUMN include_weekend_goals INTEGER NOT NULL DEFAULT 0;');
 }
 
 const timerColumns = db.prepare(`PRAGMA table_info(timers);`).all();

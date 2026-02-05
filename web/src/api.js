@@ -387,14 +387,62 @@ export const api = {
     return tryRequest('/auth/preferences')
   },
 
-  updateUserPreferences(preferences) {
+  updateUserPreferences(prefs) {
     if (isLocalMode()) {
       return Promise.resolve(null)
     }
     return tryRequest('/auth/preferences', {
       method: 'PATCH',
-      body: JSON.stringify(preferences)
+      body: JSON.stringify(prefs)
     })
+  },
+
+  async getDailyGoals(from, to) {
+    if (isLocalMode()) {
+      try {
+        const raw = localStorage.getItem('yatt_daily_goals')
+        const all = raw ? JSON.parse(raw) : {}
+        const result = {}
+        for (const date of Object.keys(all)) {
+          if (date >= from && date <= to) result[date] = all[date]
+        }
+        return result
+      } catch (e) {
+        return {}
+      }
+    }
+    const result = await tryRequest(`/auth/daily-goals?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+    return result || {}
+  },
+
+  async setDailyGoal(date, hours) {
+    const d = typeof date === 'string' ? new Date(date + 'T12:00:00') : date
+    const dateStr = typeof date === 'string' ? date : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    if (isLocalMode()) {
+      const raw = localStorage.getItem('yatt_daily_goals') || '{}'
+      const all = JSON.parse(raw)
+      all[dateStr] = hours
+      localStorage.setItem('yatt_daily_goals', JSON.stringify(all))
+      return { date: dateStr, hours }
+    }
+    const result = await tryRequest(`/auth/daily-goals/${dateStr}`, {
+      method: 'PUT',
+      body: JSON.stringify({ hours })
+    })
+    return result || { date: dateStr, hours }
+  },
+
+  async clearDailyGoal(date) {
+    const d = typeof date === 'string' ? new Date(date + 'T12:00:00') : date
+    const dateStr = typeof date === 'string' ? date : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    if (isLocalMode()) {
+      const raw = localStorage.getItem('yatt_daily_goals') || '{}'
+      const all = JSON.parse(raw)
+      delete all[dateStr]
+      localStorage.setItem('yatt_daily_goals', JSON.stringify(all))
+      return
+    }
+    await tryRequest(`/auth/daily-goals/${dateStr}`, { method: 'DELETE' })
   },
 
   async getProjects() {
@@ -696,7 +744,10 @@ export const api = {
     return {
       dateFormat: preferences.dateFormat,
       timeFormat: preferences.timeFormat,
-      dayStartHour: preferences.dayStartHour
+      dayStartHour: preferences.dayStartHour,
+      dailyGoalEnabled: preferences.dailyGoalEnabled,
+      defaultDailyGoalHours: preferences.defaultDailyGoalHours,
+      includeWeekendGoals: preferences.includeWeekendGoals
     }
   },
 

@@ -57,7 +57,9 @@ Item {
 
             Text {
                 anchors.centerIn: parent
-                text: compactRoot.formatHHmm(root.todayTotal)
+                text: root.dailyGoalEnabled && root.todayRemainingMs >= 0
+                      ? (root.todayRemainingMs > 0 ? compactRoot.formatHHmm(root.todayRemainingMs) + " left" : "0h left")
+                      : compactRoot.formatHHmm(root.todayTotal)
                 color: root.isRunning ? Kirigami.Theme.textColor : Kirigami.Theme.disabledTextColor
                 font: Kirigami.Theme.defaultFont
             }

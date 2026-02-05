@@ -6,10 +6,12 @@ import { formatProjectLabel } from '../projects.js'
 const props = defineProps({
   timers: Array,
   projects: { type: Array, default: () => [] },
-  currentElapsed: Number
+  currentElapsed: Number,
+  dailyGoalEnabled: { type: Boolean, default: false },
+  dayGoalForDate: { type: Function, default: null }
 })
 
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'dayGoalClick'])
 
 // Get the Monday of the current week being viewed
 const weekOffset = ref(0)
@@ -183,8 +185,21 @@ const weekLabel = computed(() => {
             class="day-header"
             :class="{ today: isToday(day) }"
           >
-            <span class="day-name">{{ dayNames[index] }}</span>
-            <span class="day-date" :class="{ 'is-today': isToday(day) }">{{ formatDayNumber(day) }}</span>
+            <button
+              v-if="dailyGoalEnabled"
+              type="button"
+              class="day-header-goal-wrap"
+              :title="dayGoalForDate ? `Goal: ${dayGoalForDate(day)}h (click to change)` : 'Set goal'"
+              @click.stop="emit('dayGoalClick', day)"
+            >
+              <span class="day-name">{{ dayNames[index] }}</span>
+              <span class="day-date" :class="{ 'is-today': isToday(day) }">{{ formatDayNumber(day) }}</span>
+              <span v-if="dayGoalForDate && dayGoalForDate(day) != null" class="day-goal-badge">{{ dayGoalForDate(day) }}h</span>
+            </button>
+            <template v-else>
+              <span class="day-name">{{ dayNames[index] }}</span>
+              <span class="day-date" :class="{ 'is-today': isToday(day) }">{{ formatDayNumber(day) }}</span>
+            </template>
           </div>
         </div>
       </div>
@@ -334,6 +349,31 @@ const weekLabel = computed(() => {
 
 .day-header:last-child {
   border-right: none;
+}
+
+.day-header-goal-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+  color: inherit;
+  font: inherit;
+}
+
+.day-header-goal-wrap:hover {
+  background: var(--bg-tertiary);
+}
+
+.day-goal-badge {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
 .day-header.today {
