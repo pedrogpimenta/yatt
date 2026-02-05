@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { api } from '../api.js'
 import { preferences } from '../preferences.js'
+import { formatDate, formatTime } from '../preferences.js'
 import { formatProjectLabel } from '../projects.js'
 import * as offlineStorage from '../offlineStorage.js'
 import DeviceSync from './DeviceSync.vue'
@@ -160,9 +161,13 @@ function escapeCSV(value) {
 
 async function downloadCSV() {
   try {
-    const timers = await offlineStorage.getAllTimers()
+    const [timers, projects] = await Promise.all([
+      offlineStorage.getAllTimers(),
+      offlineStorage.getAllProjects()
+    ])
+    const projectById = new Map((projects || []).map((p) => [String(p.id), p]))
     
-    const headers = ['ID', 'Tag', 'Start Time', 'End Time', 'Duration']
+    const headers = ['ID', 'Tag', 'Project', 'Description', 'Start Time', 'End Time', 'Duration']
     const rows = [headers.join(',')]
     
     timers.sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
@@ -171,12 +176,18 @@ async function downloadCSV() {
       const start = new Date(timer.start_time)
       const end = timer.end_time ? new Date(timer.end_time) : null
       const duration = end ? end.getTime() - start.getTime() : null
+      const project = timer.project_id != null ? projectById.get(String(timer.project_id)) : null
+      const projectLabel = project ? formatProjectLabel(project) : (timer.project_name || '')
+      const startFormatted = `${formatDate(start)} ${formatTime(start)}`
+      const endFormatted = end ? `${formatDate(end)} ${formatTime(end)}` : ''
       
       const row = [
         escapeCSV(timer.id),
         escapeCSV(timer.tag || ''),
-        escapeCSV(timer.start_time),
-        escapeCSV(timer.end_time || ''),
+        escapeCSV(projectLabel),
+        escapeCSV(timer.description || ''),
+        escapeCSV(startFormatted),
+        escapeCSV(endFormatted),
         escapeCSV(formatDurationForCSV(duration))
       ]
       rows.push(row.join(','))

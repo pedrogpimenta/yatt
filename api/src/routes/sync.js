@@ -32,7 +32,7 @@ function generateSyncCode() {
 // Create a new sync session
 router.post('/create', (req, res) => {
   try {
-    const { deviceId, timers } = req.body;
+    const { deviceId, timers, projects, preferences } = req.body;
 
     if (!deviceId) {
       return res.status(400).json({ error: 'Device ID is required' });
@@ -44,12 +44,14 @@ router.post('/create', (req, res) => {
       syncCode = generateSyncCode();
     } while (syncSessions.has(syncCode));
 
-    // Store session
+    // Store session (include projects and preferences for transfer)
     syncSessions.set(syncCode, {
       createdAt: Date.now(),
       initiator: {
         deviceId,
-        timers: timers || []
+        timers: timers || [],
+        projects: projects || [],
+        preferences: preferences || null
       },
       joiner: null,
       status: 'waiting' // waiting, joined, completed
@@ -68,7 +70,7 @@ router.post('/create', (req, res) => {
 // Join an existing sync session
 router.post('/join', (req, res) => {
   try {
-    const { syncCode, deviceId, timers } = req.body;
+    const { syncCode, deviceId, timers, projects, preferences } = req.body;
 
     if (!syncCode || !deviceId) {
       return res.status(400).json({ error: 'Sync code and device ID are required' });
@@ -88,17 +90,21 @@ router.post('/join', (req, res) => {
       return res.status(400).json({ error: 'Cannot sync with yourself' });
     }
 
-    // Store joiner data
+    // Store joiner data (include projects and preferences)
     session.joiner = {
       deviceId,
-      timers: timers || []
+      timers: timers || [],
+      projects: projects || [],
+      preferences: preferences || null
     };
     session.status = 'joined';
 
-    // Return the initiator's timers to the joiner
+    // Return the initiator's timers, projects, and preferences to the joiner
     res.json({
       status: 'joined',
       timers: session.initiator.timers,
+      projects: session.initiator.projects,
+      preferences: session.initiator.preferences,
       message: 'Sync successful! Timers from the other device are included.'
     });
   } catch (err) {
@@ -123,9 +129,11 @@ router.get('/status/:syncCode', (req, res) => {
       expiresAt: session.createdAt + 10 * 60 * 1000
     };
 
-    // If joined, include the joiner's timers for the initiator
+    // If joined, include the joiner's timers, projects, and preferences for the initiator
     if (session.status === 'joined' && session.joiner) {
       response.timers = session.joiner.timers;
+      response.projects = session.joiner.projects;
+      response.preferences = session.joiner.preferences;
       // Mark as completed and schedule deletion
       session.status = 'completed';
       setTimeout(() => {

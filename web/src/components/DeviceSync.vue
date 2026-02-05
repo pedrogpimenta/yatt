@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { api } from '../api.js'
+import { preferences } from '../preferences.js'
 import * as offlineStorage from '../offlineStorage.js'
 
 const emit = defineEmits(['close', 'synced'])
@@ -36,8 +37,20 @@ async function generateExport() {
   error.value = ''
   
   try {
-    const timers = await offlineStorage.getAllTimers()
-    const data = JSON.stringify(timers)
+    const [timers, projects] = await Promise.all([
+      offlineStorage.getAllTimers(),
+      offlineStorage.getAllProjects()
+    ])
+    const payload = {
+      timers,
+      projects: projects || [],
+      preferences: {
+        dateFormat: preferences.dateFormat,
+        timeFormat: preferences.timeFormat,
+        dayStartHour: preferences.dayStartHour
+      }
+    }
+    const data = JSON.stringify(payload)
     exportData.value = btoa(unescape(encodeURIComponent(data)))
   } catch (err) {
     error.value = 'Failed to export data: ' + err.message
@@ -69,14 +82,30 @@ async function handleImport() {
   
   try {
     const json = decodeURIComponent(escape(atob(data)))
-    const timers = JSON.parse(json)
+    const parsed = JSON.parse(json)
     
-    if (!Array.isArray(timers)) {
+    let timers = []
+    let projects = []
+    let prefs = null
+    
+    if (Array.isArray(parsed)) {
+      // Legacy format: raw array of timers
+      timers = parsed
+    } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.timers)) {
+      timers = parsed.timers
+      if (Array.isArray(parsed.projects)) projects = parsed.projects
+      if (parsed.preferences && typeof parsed.preferences === 'object') prefs = parsed.preferences
+    } else {
       throw new Error('Invalid data format')
     }
     
-    await api.completeSyncImport(timers)
-    success.value = `Imported ${timers.length} timer(s) successfully!`
+    await api.completeSyncImport(timers, projects, prefs)
+    if (prefs) {
+      if (prefs.dateFormat != null) preferences.dateFormat = prefs.dateFormat
+      if (prefs.timeFormat != null) preferences.timeFormat = prefs.timeFormat
+      if (prefs.dayStartHour != null) preferences.dayStartHour = prefs.dayStartHour
+    }
+    success.value = `Imported ${timers.length} timer(s)${projects.length ? `, ${projects.length} project(s)` : ''} successfully!`
     setTimeout(() => {
       emit('synced')
     }, 1500)
@@ -121,11 +150,15 @@ async function startSharing() {
 function startPolling() {
   polling.value = true
   pollInterval = setInterval(async () => {
-    try {
-      const status = await api.getSyncStatus(syncCode.value)
+  try {
+    const status = await api.getSyncStatus(syncCode.value)
       if (status.status === 'joined' && status.timers) {
-        // Import the timers from the other device
-        await api.completeSyncImport(status.timers)
+        await api.completeSyncImport(status.timers, status.projects, status.preferences)
+        if (status.preferences) {
+          if (status.preferences.dateFormat != null) preferences.dateFormat = status.preferences.dateFormat
+          if (status.preferences.timeFormat != null) preferences.timeFormat = status.preferences.timeFormat
+          if (status.preferences.dayStartHour != null) preferences.dayStartHour = status.preferences.dayStartHour
+        }
         success.value = 'Sync complete! Timers have been merged.'
         stopPolling()
         setTimeout(() => {
@@ -163,7 +196,12 @@ async function joinSession() {
   try {
     const result = await api.joinSyncSession(code)
     if (result.timers) {
-      await api.completeSyncImport(result.timers)
+      await api.completeSyncImport(result.timers, result.projects, result.preferences)
+      if (result.preferences) {
+        if (result.preferences.dateFormat != null) preferences.dateFormat = result.preferences.dateFormat
+        if (result.preferences.timeFormat != null) preferences.timeFormat = result.preferences.timeFormat
+        if (result.preferences.dayStartHour != null) preferences.dayStartHour = result.preferences.dayStartHour
+      }
     }
     success.value = 'Sync complete! Timers have been merged.'
     setTimeout(() => {

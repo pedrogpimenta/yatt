@@ -1,4 +1,5 @@
 import * as offlineStorage from './offlineStorage.js'
+import { preferences } from './preferences.js'
 
 const API_BASE = '/api'
 
@@ -226,13 +227,19 @@ async function attemptSync() {
       }
     }
 
-    // Refresh timers from server after sync
+    // Refresh timers and projects from server after sync
     if (syncedCount > 0) {
       try {
         const serverTimers = await request('/timers')
         await offlineStorage.saveTimers(serverTimers)
       } catch (err) {
         console.error('Failed to refresh timers after sync:', err)
+      }
+      try {
+        const serverProjects = await request('/projects')
+        await offlineStorage.saveProjects(serverProjects)
+      } catch (err) {
+        console.error('Failed to refresh projects after sync:', err)
       }
     }
 
@@ -685,14 +692,25 @@ export const api = {
   },
 
   // Sync methods for QR code pairing
+  getPreferencesForSync() {
+    return {
+      dateFormat: preferences.dateFormat,
+      timeFormat: preferences.timeFormat,
+      dayStartHour: preferences.dayStartHour
+    }
+  },
+
   async createSyncSession() {
-    const timers = await offlineStorage.getAllTimers()
+    const [timers, projects] = await Promise.all([
+      offlineStorage.getAllTimers(),
+      offlineStorage.getAllProjects()
+    ])
     const deviceId = getDeviceId()
-    
+    const prefs = this.getPreferencesForSync()
     const res = await fetch(`${API_BASE}/sync/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceId, timers })
+      body: JSON.stringify({ deviceId, timers, projects: projects || [], preferences: prefs })
     })
     
     if (!res.ok) {
@@ -704,13 +722,16 @@ export const api = {
   },
 
   async joinSyncSession(syncCode) {
-    const timers = await offlineStorage.getAllTimers()
+    const [timers, projects] = await Promise.all([
+      offlineStorage.getAllTimers(),
+      offlineStorage.getAllProjects()
+    ])
     const deviceId = getDeviceId()
-    
+    const prefs = this.getPreferencesForSync()
     const res = await fetch(`${API_BASE}/sync/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ syncCode, deviceId, timers })
+      body: JSON.stringify({ syncCode, deviceId, timers, projects: projects || [], preferences: prefs })
     })
     
     if (!res.ok) {
@@ -732,14 +753,12 @@ export const api = {
     return await res.json()
   },
 
-  async completeSyncImport(timers) {
+  async completeSyncImport(timers, projects = null, preferencesPayload = null) {
     // Merge timers into local storage
     const existingTimers = await offlineStorage.getAllTimers()
     const existingIds = new Set(existingTimers.map(t => t.id))
-    
-    // Add new timers, update existing ones
+
     for (const timer of timers) {
-      // Generate new local ID if it conflicts
       if (existingIds.has(timer.id)) {
         const newId = offlineStorage.generateLocalId()
         await offlineStorage.saveTimer({ ...timer, id: newId })
@@ -747,6 +766,20 @@ export const api = {
         await offlineStorage.saveTimer(timer)
       }
     }
+
+    // Merge projects if provided
+    if (Array.isArray(projects) && projects.length > 0) {
+      const existingProjects = await offlineStorage.getAllProjects()
+      const existingProjectIds = new Set(existingProjects.map((p) => String(p.id)))
+      for (const project of projects) {
+        if (!existingProjectIds.has(String(project.id))) {
+          await offlineStorage.saveProject(project)
+        }
+      }
+    }
+
+    // Preferences are applied by the caller (DeviceSync) so the reactive preferences object updates
+    return { preferencesPayload }
   },
 
   // Local mode helpers
