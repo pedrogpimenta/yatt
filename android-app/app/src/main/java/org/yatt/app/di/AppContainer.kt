@@ -6,6 +6,7 @@ import org.yatt.app.data.local.AppDatabase
 import org.yatt.app.data.remote.ApiService
 import org.yatt.app.data.repository.AuthRepository
 import org.yatt.app.data.repository.DeviceSyncRepository
+import org.yatt.app.data.repository.ProjectsRepository
 import org.yatt.app.data.repository.TimerRepository
 import org.yatt.app.notifications.NotificationController
 import org.yatt.app.util.ConnectivityObserver
@@ -24,9 +25,17 @@ class AppContainer(context: Context) {
         apiService = apiService,
         timerDao = database.timerDao(),
         syncQueueDao = database.syncQueueDao(),
+        projectDao = database.projectDao(),
         settingsStore = settingsStore,
         connectivityObserver = connectivityObserver,
         notificationController = notificationController
     )
-    val deviceSyncRepository = DeviceSyncRepository(apiService, database.timerDao(), settingsStore)
+    val projectDao = database.projectDao()
+    val projectsRepository = ProjectsRepository(settingsStore, apiService, projectDao)
+    val deviceSyncRepository = DeviceSyncRepository(
+        apiService,
+        database.timerDao(),
+        projectDao,
+        settingsStore
+    )
 }

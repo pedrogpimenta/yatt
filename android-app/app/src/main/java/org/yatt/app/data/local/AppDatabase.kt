@@ -21,14 +21,28 @@ private val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
+private val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT NOT NULL PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT,
+                clientName TEXT
+            )
+        """.trimIndent())
+    }
+}
+
 @Database(
-    entities = [TimerEntity::class, SyncOperationEntity::class],
-    version = 3,
+    entities = [TimerEntity::class, SyncOperationEntity::class, ProjectEntity::class],
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun timerDao(): TimerDao
     abstract fun syncQueueDao(): SyncQueueDao
+    abstract fun projectDao(): ProjectDao
 
     companion object {
         @Volatile
@@ -40,7 +54,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "yatt.db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
             }
         }
     }

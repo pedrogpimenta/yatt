@@ -40,15 +40,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import org.yatt.app.data.model.Project
+import org.yatt.app.data.model.ProjectItem
 import org.yatt.app.viewmodel.ProjectsViewModel
-
-private fun formatProjectLabel(project: Project): String {
-    val parts = mutableListOf(project.name)
-    project.type?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
-    project.clientName?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
-    return parts.joinToString(" - ")
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,8 +51,8 @@ fun ProjectsScreen(
 ) {
     val uiState by projectsViewModel.uiState.collectAsState()
     var showAddEdit by remember { mutableStateOf(false) }
-    var editingProject by remember { mutableStateOf<Project?>(null) }
-    var deleteConfirmProject by remember { mutableStateOf<Project?>(null) }
+    var editingProject by remember { mutableStateOf<ProjectItem?>(null) }
+    var deleteConfirmProject by remember { mutableStateOf<ProjectItem?>(null) }
 
     LaunchedEffect(Unit) {
         projectsViewModel.loadProjects()
@@ -101,7 +94,7 @@ fun ProjectsScreen(
                 if (editingProject != null) {
                     projectsViewModel.updateProject(editingProject!!.id, name, type, clientName, clientId)
                 } else {
-                    projectsViewModel.createProject(name, type, clientName, clientId)
+                    projectsViewModel.createProject(name, type, clientName, null)
                 }
                 showAddEdit = false
                 editingProject = null
@@ -177,7 +170,7 @@ fun ProjectsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = formatProjectLabel(project),
+                                    text = project.formatLabel(),
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
@@ -204,7 +197,7 @@ fun ProjectsScreen(
 
 @Composable
 private fun ProjectEditDialog(
-    project: Project?,
+    project: ProjectItem?,
     onDismiss: () -> Unit,
     onSave: (name: String, type: String?, clientName: String?, clientId: Long?) -> Unit
 ) {

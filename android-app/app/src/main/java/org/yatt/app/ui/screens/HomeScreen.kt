@@ -10,20 +10,31 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.NavigationBar
@@ -32,12 +43,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.List
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.Today
+import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -47,12 +62,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import org.yatt.app.data.UserPreferences
 import org.yatt.app.data.local.TimerEntity
+import org.yatt.app.data.model.ProjectItem
 import org.yatt.app.ui.components.ManualEntryDialog
 import org.yatt.app.ui.components.TagInputField
 import org.yatt.app.ui.components.TimerEditDialog
@@ -78,16 +96,19 @@ fun HomeScreen(
 ) {
     val uiState by timerViewModel.uiState.collectAsState()
     val preferences by timerViewModel.preferencesFlow.collectAsState(
-        initial = UserPreferences("dd/MM/yyyy", "24h", 0, "https://time-server.command.pimenta.pt/")
+        initial = UserPreferences("dd/MM/yyyy", "24h", 0)
     )
 
     var selectedTab by remember { mutableStateOf(MainTab.TIMER) }
     var filterTag by remember { mutableStateOf("") }
     var newTag by remember { mutableStateOf("") }
+    var newProjectId by remember { mutableStateOf<String?>(null) }
+    var newDescription by remember { mutableStateOf("") }
     var selectedTimer by remember { mutableStateOf<TimerEntity?>(null) }
     var showManualEntry by remember { mutableStateOf(false) }
     var showEditElapsed by remember { mutableStateOf(false) }
     var elapsedInput by remember { mutableStateOf("") }
+    val projects by timerViewModel.projectsFlow.collectAsState(initial = emptyList())
 
     val runningTimer = uiState.timers.firstOrNull { it.endTime == null }
     var now by remember { mutableStateOf(Instant.now()) }
@@ -107,8 +128,12 @@ fun HomeScreen(
     LaunchedEffect(runningTimer?.id) {
         if (runningTimer == null) {
             newTag = ""
+            newProjectId = null
+            newDescription = ""
         } else {
             newTag = runningTimer.tag.orEmpty()
+            newProjectId = runningTimer.projectId
+            newDescription = runningTimer.description.orEmpty()
         }
     }
 
@@ -149,8 +174,9 @@ fun HomeScreen(
     if (showManualEntry) {
         ManualEntryDialog(
             preferences = preferences,
-            onSave = { start, end, tag, description ->
-                timerViewModel.createManualEntry(start, end, tag, description)
+            projects = projects,
+            onSave = { start, end, tag, description, projectId, projectName, clientName ->
+                timerViewModel.createManualEntry(start, end, tag, description, projectId, projectName, clientName)
                 showManualEntry = false
             },
             onDismiss = { showManualEntry = false }
@@ -161,8 +187,9 @@ fun HomeScreen(
         TimerEditDialog(
             timer = timer,
             preferences = preferences,
-            onSave = { start, end, tag, description ->
-                timerViewModel.updateTimer(timer.id, start.toString(), end?.toString(), tag, description)
+            projects = projects,
+            onSave = { start, end, tag, description, projectId ->
+                timerViewModel.updateTimer(timer.id, start.toString(), end?.toString(), tag, description, projectId)
                 selectedTimer = null
             },
             onDelete = {
@@ -219,6 +246,11 @@ fun HomeScreen(
                 currentElapsed = currentElapsed,
                 newTag = newTag,
                 onNewTagChange = { newTag = it },
+                newProjectId = newProjectId,
+                onNewProjectIdChange = { newProjectId = it },
+                newDescription = newDescription,
+                onNewDescriptionChange = { newDescription = it },
+                projects = projects,
                 uiState = uiState,
                 now = now,
                 preferences = preferences,
@@ -298,6 +330,11 @@ private fun TimerTabContent(
     currentElapsed: Duration,
     newTag: String,
     onNewTagChange: (String) -> Unit,
+    newProjectId: String?,
+    onNewProjectIdChange: (String?) -> Unit,
+    newDescription: String,
+    onNewDescriptionChange: (String) -> Unit,
+    projects: List<ProjectItem>,
     uiState: TimerUiState,
     now: Instant,
     preferences: UserPreferences,
@@ -306,13 +343,17 @@ private fun TimerTabContent(
     timerViewModel: TimerViewModel,
     onShowManualEntry: () -> Unit
 ) {
+    val selectedProject = projects.find { it.id == newProjectId }
+    val colorScheme = MaterialTheme.colorScheme
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Current timer card first
         RunningTimerCard(
             runningTimer = runningTimer,
             elapsed = currentElapsed,
@@ -321,39 +362,98 @@ private fun TimerTabContent(
             onEditStartTime = onEditStartTime
         )
 
+        // Start/Stop button below current timer
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            val isRunning = runningTimer != null
+            val currentTimer = runningTimer
+            FilledTonalButton(
+                onClick = {
+                    if (isRunning && currentTimer != null) {
+                        timerViewModel.updateRunningFields(currentTimer.id, newTag, newProjectId, newDescription)
+                        timerViewModel.stopTimer(currentTimer.id)
+                    } else {
+                        timerViewModel.startTimer(newTag, newProjectId, newDescription, selectedProject?.name, selectedProject?.clientName)
+                    }
+                },
+                modifier = Modifier
+                    .height(72.dp)
+                    .widthIn(min = 200.dp),
+                shape = CircleShape,
+                colors = if (isRunning) {
+                    ButtonDefaults.filledTonalButtonColors(containerColor = colorScheme.errorContainer, contentColor = colorScheme.onErrorContainer)
+                } else {
+                    ButtonDefaults.filledTonalButtonColors(containerColor = colorScheme.primaryContainer, contentColor = colorScheme.onPrimaryContainer)
+                }
+            ) {
+                Icon(
+                    imageVector = if (isRunning) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = if (isRunning) "Stop" else "Start",
+                    style = MaterialTheme.typography.titleLarge
+                )
+            }
+        }
+
+        // Day and week totals
+        StatsRow(timers = uiState.timers, now = now, preferences = preferences)
+
+        // Tag, project, description – edit current timer when running
         TagInputField(
             value = newTag,
             onValueChange = onNewTagChange,
             tags = uiState.tags,
-            placeholder = if (runningTimer != null) "Change tag" else "Tag (optional)",
+            placeholder = if (runningTimer != null) "Tag" else "Tag (optional)",
             onSubmit = {
                 if (runningTimer != null) {
-                    timerViewModel.updateRunningTag(runningTimer.id, newTag)
+                    timerViewModel.updateRunningFields(runningTimer.id, newTag, newProjectId, newDescription)
                 } else {
-                    timerViewModel.startTimer(newTag)
+                    timerViewModel.startTimer(newTag, newProjectId, newDescription, selectedProject?.name, selectedProject?.clientName)
                 }
             }
         )
+        ProjectSelectorRow(
+            projects = projects,
+            selectedProjectId = newProjectId,
+            onProjectSelected = { id ->
+                onNewProjectIdChange(id)
+                if (runningTimer != null) {
+                    timerViewModel.updateRunningFields(runningTimer.id, newTag, id, newDescription)
+                }
+            },
+            label = if (runningTimer != null) "Project" else "Project (optional)"
+        )
+        OutlinedTextField(
+            value = newDescription,
+            onValueChange = onNewDescriptionChange,
+            label = { Text("Description (optional)") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { focusState ->
+                    if (!focusState.hasFocus && runningTimer != null) {
+                        timerViewModel.updateRunningFields(runningTimer.id, newTag, newProjectId, newDescription)
+                    }
+                },
+            minLines = 1,
+            maxLines = 3
+        )
 
-        Button(
-            onClick = { timerViewModel.toggleTimer(runningTimer, newTag) },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (runningTimer == null) "Start" else "Stop")
-        }
-
-        Button(
+        OutlinedButton(
             onClick = onShowManualEntry,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Add past entry")
         }
 
-        if (!uiState.error.isNullOrBlank()) {
-            Text(uiState.error ?: "", color = MaterialTheme.colorScheme.error)
+        uiState.error?.takeIf { it.isNotBlank() }?.let { err ->
+            Text(err, color = colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
-
-        StatsRow(timers = uiState.timers, now = now, preferences = preferences)
     }
 }
 
@@ -365,37 +465,70 @@ private fun RunningTimerCard(
     onEditElapsed: () -> Unit,
     onEditStartTime: (TimerEntity) -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     val elapsedText = TimeUtils.formatDuration(elapsed)
     val tagLabel = runningTimer?.tag?.ifBlank { null }
+    val projectLabel = runningTimer?.let { t ->
+        when {
+            t.projectName != null && t.clientName != null -> "${t.projectName} - ${t.clientName}"
+            t.projectName != null -> t.projectName
+            else -> null
+        }
+    }
     val descriptionLabel = runningTimer?.description?.takeIf { it.isNotBlank() }
     val startTime = runningTimer?.let { TimeUtils.formatTime(TimeUtils.parseInstant(it.startTime), preferences.timeFormat) }
+    val isRunning = runningTimer != null
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(12.dp)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isRunning) colorScheme.primaryContainer.copy(alpha = 0.7f)
+            else colorScheme.surfaceVariant.copy(alpha = 0.8f)
+        ),
+        shape = CardDefaults.elevatedShape
     ) {
-        Text("Current timer", style = MaterialTheme.typography.titleMedium)
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(elapsedText, style = MaterialTheme.typography.headlineMedium)
-        if (!tagLabel.isNullOrBlank()) {
-            Text(tagLabel, style = MaterialTheme.typography.bodyMedium)
-        }
-        if (descriptionLabel != null) {
-            Text(descriptionLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (runningTimer == null) {
-            Text("Stopped", style = MaterialTheme.typography.bodySmall)
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Started $startTime", style = MaterialTheme.typography.bodySmall)
-                Spacer(modifier = Modifier.width(8.dp))
-                TextButton(onClick = { onEditStartTime(runningTimer) }) {
-                    Text("Edit start time")
-                }
-                TextButton(onClick = onEditElapsed) {
-                    Text("Edit elapsed")
-                }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+        ) {
+            Text(
+                text = if (isRunning) "Running" else "Current timer",
+                style = MaterialTheme.typography.labelLarge,
+                color = if (isRunning) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = elapsedText,
+                style = MaterialTheme.typography.displayMedium,
+                color = if (isRunning) colorScheme.onPrimaryContainer else colorScheme.onSurface,
+                modifier = Modifier.then(
+                    if (isRunning) Modifier.clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { onEditElapsed() }
+                    else Modifier
+                )
+            )
+            if (!tagLabel.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(tagLabel, style = MaterialTheme.typography.titleSmall, color = if (isRunning) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant)
+            }
+            if (projectLabel != null) {
+                Text(projectLabel, style = MaterialTheme.typography.bodyMedium, color = if (isRunning) colorScheme.onPrimaryContainer.copy(alpha = 0.9f) else colorScheme.onSurfaceVariant)
+            }
+            if (descriptionLabel != null) {
+                Text(descriptionLabel, style = MaterialTheme.typography.bodySmall, color = if (isRunning) colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else colorScheme.onSurfaceVariant)
+            }
+            if (isRunning && runningTimer != null) {
+                val timer = runningTimer
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Started $startTime",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colorScheme.onPrimaryContainer.copy(alpha = 0.9f),
+                    modifier = Modifier.clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { onEditStartTime(timer) }
+                )
+            } else {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Stopped", style = MaterialTheme.typography.bodySmall, color = colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -407,15 +540,32 @@ private fun StatsRow(
     now: Instant,
     preferences: UserPreferences
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     val todayTotal = computeTotal(timers, now, preferences.dayStartHour, true)
     val weekTotal = computeTotal(timers, now, preferences.dayStartHour, false)
+    val todayText = TimeUtils.formatDuration(todayTotal)
+    val weekText = TimeUtils.formatDuration(weekTotal)
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        StatCard(modifier = Modifier.fillMaxWidth(0.5f), label = "Today", value = TimeUtils.formatDuration(todayTotal))
-        StatCard(modifier = Modifier.fillMaxWidth(0.5f), label = "This week", value = TimeUtils.formatDuration(weekTotal))
+        StatCard(
+            modifier = Modifier.weight(1f),
+            label = "Today",
+            value = todayText,
+            containerColor = colorScheme.secondaryContainer,
+            contentColor = colorScheme.onSecondaryContainer,
+            icon = Icons.Outlined.Today
+        )
+        StatCard(
+            modifier = Modifier.weight(1f),
+            label = "This week",
+            value = weekText,
+            containerColor = colorScheme.tertiaryContainer,
+            contentColor = colorScheme.onTertiaryContainer,
+            icon = Icons.Outlined.DateRange
+        )
     }
 }
 
@@ -423,15 +573,90 @@ private fun StatsRow(
 private fun StatCard(
     modifier: Modifier = Modifier,
     label: String,
-    value: String
+    value: String,
+    containerColor: Color,
+    contentColor: Color,
+    icon: ImageVector
 ) {
-    Column(
-        modifier = modifier
-            .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        shape = CardDefaults.elevatedShape
     ) {
-        Text(value, style = MaterialTheme.typography.titleMedium)
-        Text(label, style = MaterialTheme.typography.labelSmall)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = contentColor
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.headlineSmall,
+                color = contentColor
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = contentColor.copy(alpha = 0.9f)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProjectSelectorRow(
+    projects: List<ProjectItem>,
+    selectedProjectId: String?,
+    onProjectSelected: (String?) -> Unit,
+    label: String
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedProject = projects.find { it.id == selectedProjectId }
+    val displayValue = selectedProject?.formatLabel() ?: "None"
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value = displayValue,
+            onValueChange = {},
+            label = { Text(label) },
+            readOnly = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor()
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("None") },
+                onClick = {
+                    onProjectSelected(null)
+                    expanded = false
+                }
+            )
+            projects.forEach { project ->
+                DropdownMenuItem(
+                    text = { Text(project.formatLabel()) },
+                    onClick = {
+                        onProjectSelected(project.id)
+                        expanded = false
+                    }
+                )
+            }
+        }
     }
 }
 

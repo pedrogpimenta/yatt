@@ -92,6 +92,9 @@ class MainActivity : ComponentActivity() {
         val navController = rememberNavController()
         NavHost(navController = navController, startDestination = "home") {
             composable("home") {
+                LaunchedEffect(Unit) {
+                    projectsViewModel.loadProjects()
+                }
                 HomeScreen(
                     timerViewModel = timerViewModel,
                     onOpenSettings = { navController.navigate("settings") }

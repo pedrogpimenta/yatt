@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import org.yatt.app.data.SettingsStore
 import org.yatt.app.data.local.TimerEntity
 import org.yatt.app.data.remote.TimerWebSocket
+import org.yatt.app.data.repository.ProjectsRepository
 import org.yatt.app.data.repository.TimerRepository
 import java.time.Instant
 
@@ -25,6 +26,7 @@ data class TimerUiState(
 
 class TimerViewModel(
     private val timerRepository: TimerRepository,
+    private val projectsRepository: ProjectsRepository,
     private val settingsStore: SettingsStore
 ) : ViewModel() {
     private val webSocket = TimerWebSocket(settingsStore) {
@@ -32,6 +34,7 @@ class TimerViewModel(
     }
     val preferencesFlow = settingsStore.preferencesFlow
     val localModeFlow = settingsStore.localModeFlow
+    val projectsFlow = projectsRepository.projectsFlow
     private val tags = MutableStateFlow<List<String>>(emptyList())
     private val loading = MutableStateFlow(true)
     private val error = MutableStateFlow<String?>(null)
@@ -126,20 +129,27 @@ class TimerViewModel(
         }
     }
 
-    fun toggleTimer(runningTimer: TimerEntity?, tag: String) {
+    fun toggleTimer(runningTimer: TimerEntity?, tag: String, projectId: String? = null, description: String? = null) {
         if (runningTimer == null) {
-            startTimer(tag)
+            startTimer(tag, projectId, description)
         } else {
             stopTimer(runningTimer.id)
         }
     }
 
-    fun startTimer(tag: String) {
+    fun startTimer(tag: String, projectId: String? = null, description: String? = null, projectName: String? = null, clientName: String? = null) {
         viewModelScope.launch {
             error.value = null
             try {
                 val sanitizedTag = tag.trim().ifBlank { null }
-                timerRepository.createTimer(tag = sanitizedTag)
+                val sanitizedDesc = description?.trim()?.takeIf { it.isNotBlank() }
+                timerRepository.createTimer(
+                    tag = sanitizedTag,
+                    description = sanitizedDesc,
+                    projectId = projectId,
+                    projectName = projectName,
+                    clientName = clientName
+                )
                 refreshTags()
             } catch (ex: Exception) {
                 error.value = ex.message
@@ -147,12 +157,13 @@ class TimerViewModel(
         }
     }
 
-    fun updateRunningTag(timerId: String, tag: String) {
+    fun updateRunningFields(timerId: String, tag: String?, projectId: String? = null, description: String? = null) {
         viewModelScope.launch {
             error.value = null
             try {
-                val sanitizedTag = tag.trim().ifBlank { null }
-                timerRepository.updateTimer(timerId, null, null, sanitizedTag)
+                val sanitizedTag = tag?.trim()?.ifBlank { null }
+                val sanitizedDesc = description?.trim()?.takeIf { it.isNotBlank() }
+                timerRepository.updateTimer(timerId, null, null, sanitizedTag, sanitizedDesc, projectId)
                 refreshTags()
             } catch (ex: Exception) {
                 error.value = ex.message
@@ -171,11 +182,11 @@ class TimerViewModel(
         }
     }
 
-    fun updateTimer(id: String, startTime: String, endTime: String?, tag: String?, description: String? = null) {
+    fun updateTimer(id: String, startTime: String, endTime: String?, tag: String?, description: String? = null, projectId: String? = null) {
         viewModelScope.launch {
             error.value = null
             try {
-                timerRepository.updateTimer(id, startTime, endTime, tag, description)
+                timerRepository.updateTimer(id, startTime, endTime, tag, description, projectId)
                 refreshTags()
             } catch (ex: Exception) {
                 error.value = ex.message
@@ -195,7 +206,7 @@ class TimerViewModel(
         }
     }
 
-    fun createManualEntry(startTime: Instant, endTime: Instant, tag: String?, description: String? = null) {
+    fun createManualEntry(startTime: Instant, endTime: Instant, tag: String?, description: String? = null, projectId: String? = null, projectName: String? = null, clientName: String? = null) {
         viewModelScope.launch {
             error.value = null
             try {
@@ -203,7 +214,10 @@ class TimerViewModel(
                     tag = tag?.trim()?.takeIf { it.isNotBlank() },
                     startTime = startTime.toString(),
                     endTime = endTime.toString(),
-                    description = description?.trim()?.takeIf { it.isNotBlank() }
+                    description = description?.trim()?.takeIf { it.isNotBlank() },
+                    projectId = projectId,
+                    projectName = projectName,
+                    clientName = clientName
                 )
                 refreshTags()
             } catch (ex: Exception) {

@@ -7,28 +7,36 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import org.yatt.app.data.remote.ApiService
-import org.yatt.app.data.model.Project
+import org.yatt.app.data.model.ProjectItem
+import org.yatt.app.data.repository.ProjectsRepository
 
 data class ProjectsUiState(
-    val projects: List<Project> = emptyList(),
+    val projects: List<ProjectItem> = emptyList(),
     val loading: Boolean = false,
     val error: String? = null
 )
 
 class ProjectsViewModel(
-    private val apiService: ApiService
+    private val projectsRepository: ProjectsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProjectsUiState())
     val uiState: StateFlow<ProjectsUiState> = _uiState.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            projectsRepository.projectsFlow.collect { list ->
+                _uiState.update { it.copy(projects = list) }
+            }
+        }
+    }
+
     fun loadProjects() {
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
             try {
-                val list = apiService.getProjects()
-                _uiState.update { it.copy(projects = list, loading = false) }
+                projectsRepository.refreshProjects()
+                _uiState.update { it.copy(loading = false) }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -44,32 +52,29 @@ class ProjectsViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
             try {
-                apiService.createProject(name, type, clientName, clientId)
-                loadProjects()
+                projectsRepository.createProject(name, type, clientName, clientId)
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message ?: "Failed to create project") }
             }
         }
     }
 
-    fun updateProject(id: Long, name: String, type: String?, clientName: String?, clientId: Long?) {
+    fun updateProject(id: String, name: String, type: String?, clientName: String?, clientId: Long?) {
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
             try {
-                apiService.updateProject(id, name, type, clientName, clientId)
-                loadProjects()
+                projectsRepository.updateProject(id, name, type, clientName, clientId)
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message ?: "Failed to update project") }
             }
         }
     }
 
-    fun deleteProject(id: Long) {
+    fun deleteProject(id: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
             try {
-                apiService.deleteProject(id)
-                loadProjects()
+                projectsRepository.deleteProject(id)
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message ?: "Failed to delete project") }
             }

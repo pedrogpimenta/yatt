@@ -71,12 +71,6 @@ class SettingsViewModel(
         }
     }
 
-    fun setApiBaseUrl(value: String) {
-        viewModelScope.launch {
-            settingsStore.setApiBaseUrl(value)
-        }
-    }
-
     fun setDateFormat(value: String) {
         viewModelScope.launch {
             settingsStore.setDateFormat(value)

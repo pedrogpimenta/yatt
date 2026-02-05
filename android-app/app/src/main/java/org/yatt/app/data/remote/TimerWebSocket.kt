@@ -28,7 +28,7 @@ class TimerWebSocket(
 
     suspend fun connect() {
         val token = settingsStore.authTokenFlow.first() ?: return
-        val baseUrl = settingsStore.preferencesFlow.first().apiBaseUrl
+        val baseUrl = ApiService.BASE_URL
         val wsUrl = baseUrl.replaceFirst("http", "ws").trimEnd('/')
         val request = Request.Builder()
             .url(wsUrl)

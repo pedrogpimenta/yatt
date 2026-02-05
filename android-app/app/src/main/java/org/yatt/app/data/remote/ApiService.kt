@@ -17,6 +17,11 @@ import org.yatt.app.data.model.UserProfile
 import java.io.IOException
 
 class ApiService(private val settingsStore: SettingsStore) {
+
+    companion object {
+        const val BASE_URL = "https://time-server.command.pimenta.pt/"
+    }
+
     private val client = OkHttpClient()
 
     suspend fun login(email: String, password: String): String {
@@ -79,7 +84,8 @@ class ApiService(private val settingsStore: SettingsStore) {
         startTime: String,
         endTime: String?,
         tag: String?,
-        description: String? = null
+        description: String? = null,
+        projectId: String? = null
     ): TimerEntity {
         val payload = JSONObject()
             .put("start_time", startTime)
@@ -87,12 +93,13 @@ class ApiService(private val settingsStore: SettingsStore) {
                 if (endTime != null) put("end_time", endTime)
                 if (tag != null) put("tag", tag)
                 if (description != null) put("description", description)
+                if (projectId != null) put("project_id", projectId.toLongOrNull() ?: projectId)
             }
         val response = requestJson("timers", "POST", payload)
         return jsonToTimer(response)
     }
 
-    suspend fun updateTimer(id: String, startTime: String?, endTime: String?, tag: String?, description: String? = null): TimerEntity {
+    suspend fun updateTimer(id: String, startTime: String?, endTime: String?, tag: String?, description: String? = null, projectId: String? = null): TimerEntity {
         val payload = JSONObject()
         if (startTime != null) payload.put("start_time", startTime)
         if (endTime != null) payload.put("end_time", endTime)
@@ -102,6 +109,9 @@ class ApiService(private val settingsStore: SettingsStore) {
             payload.put("description", description ?: JSONObject.NULL)
         } else if (description != null) {
             payload.put("description", description)
+        }
+        if (projectId != null) {
+            payload.put("project_id", projectId.toLongOrNull() ?: JSONObject.NULL)
         }
         val response = requestJson("timers/$id", "PATCH", payload)
         return jsonToTimer(response)
@@ -151,10 +161,19 @@ class ApiService(private val settingsStore: SettingsStore) {
         requestJson("projects/$id", "DELETE")
     }
 
-    suspend fun createSyncSession(deviceId: String, timers: List<TimerEntity>): SyncSession {
+    suspend fun createSyncSession(
+        deviceId: String,
+        timers: List<TimerEntity>,
+        projects: List<SyncProjectPayload>? = null,
+        preferences: JSONObject? = null
+    ): SyncSession {
         val payload = JSONObject()
             .put("deviceId", deviceId)
             .put("timers", timersToJson(timers))
+            .apply {
+                if (!projects.isNullOrEmpty()) put("projects", projectsToJson(projects))
+                if (preferences != null) put("preferences", preferences)
+            }
         val response = requestJson("sync/create", "POST", payload)
         return SyncSession(
             syncCode = response.getString("syncCode"),
@@ -162,21 +181,58 @@ class ApiService(private val settingsStore: SettingsStore) {
         )
     }
 
-    suspend fun joinSyncSession(syncCode: String, deviceId: String, timers: List<TimerEntity>): List<TimerEntity> {
+    data class SyncJoinResult(
+        val timers: List<TimerEntity>,
+        val projects: List<SyncProjectPayload>?,
+        val preferences: JSONObject?
+    )
+
+    suspend fun joinSyncSession(
+        syncCode: String,
+        deviceId: String,
+        timers: List<TimerEntity>,
+        projects: List<SyncProjectPayload>? = null,
+        preferences: JSONObject? = null
+    ): SyncJoinResult {
         val payload = JSONObject()
             .put("syncCode", syncCode)
             .put("deviceId", deviceId)
             .put("timers", timersToJson(timers))
+            .apply {
+                if (!projects.isNullOrEmpty()) put("projects", projectsToJson(projects))
+                if (preferences != null) put("preferences", preferences)
+            }
         val response = requestJson("sync/join", "POST", payload)
         val timersJson = response.optJSONArray("timers") ?: JSONArray()
-        return jsonToTimers(timersJson)
+        val projectsJson = response.optJSONArray("projects")
+        val projectsList = if (projectsJson != null) jsonToSyncProjects(projectsJson) else null
+        val prefs = response.optJSONObject("preferences")
+        return SyncJoinResult(
+            timers = jsonToTimers(timersJson),
+            projects = projectsList,
+            preferences = prefs
+        )
     }
 
-    suspend fun getSyncStatus(syncCode: String): Pair<String, List<TimerEntity>> {
+    data class SyncStatusResult(
+        val status: String,
+        val timers: List<TimerEntity>?,
+        val projects: List<SyncProjectPayload>?,
+        val preferences: JSONObject?
+    )
+
+    suspend fun getSyncStatus(syncCode: String): SyncStatusResult {
         val response = requestJson("sync/status/$syncCode", "GET")
         val status = response.getString("status")
-        val timersJson = response.optJSONArray("timers") ?: JSONArray()
-        return status to jsonToTimers(timersJson)
+        val timersJson = response.optJSONArray("timers")
+        val projectsJson = response.optJSONArray("projects")
+        val prefs = response.optJSONObject("preferences")
+        return SyncStatusResult(
+            status = status,
+            timers = timersJson?.let { jsonToTimers(it) },
+            projects = projectsJson?.let { jsonToSyncProjects(it) },
+            preferences = prefs
+        )
     }
 
     private suspend fun requestJson(
@@ -204,7 +260,7 @@ class ApiService(private val settingsStore: SettingsStore) {
     }
 
     private suspend fun execute(path: String, method: String, payload: JSONObject?): String {
-        val baseUrl = settingsStore.preferencesFlow.first().apiBaseUrl.trimEnd('/')
+        val baseUrl = BASE_URL.trimEnd('/')
         val token = settingsStore.authTokenFlow.first()
         val url = "$baseUrl/$path"
         val body = payload?.toString()?.toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -289,10 +345,57 @@ class ApiService(private val settingsStore: SettingsStore) {
                 .put("start_time", timer.startTime)
                 .put("end_time", timer.endTime)
                 .put("tag", timer.tag)
-                .apply { if (timer.description != null) put("description", timer.description) }
+                .apply {
+                    if (timer.description != null) put("description", timer.description)
+                    if (timer.projectId != null) put("project_id", timer.projectId.toLongOrNull() ?: timer.projectId)
+                }
             array.put(json)
         }
         return array
+    }
+
+    /** Payload for sync: projects as id, name, type, client_name (matches web). */
+    data class SyncProjectPayload(
+        val id: String,
+        val name: String,
+        val type: String?,
+        val clientName: String?
+    )
+
+    private fun projectsToJson(projects: List<SyncProjectPayload>): JSONArray {
+        val array = JSONArray()
+        projects.forEach { p ->
+            array.put(
+                JSONObject()
+                    .put("id", p.id.toLongOrNull() ?: p.id)
+                    .put("name", p.name)
+                    .apply {
+                        if (p.type != null) put("type", p.type)
+                        if (p.clientName != null) put("client_name", p.clientName)
+                    }
+            )
+        }
+        return array
+    }
+
+    private fun jsonToSyncProjects(array: JSONArray): List<SyncProjectPayload> {
+        val result = ArrayList<SyncProjectPayload>(array.length())
+        for (i in 0 until array.length()) {
+            val o = array.getJSONObject(i)
+            val id = when {
+                o.has("id") -> o.get("id").toString()
+                else -> ""
+            }
+            result.add(
+                SyncProjectPayload(
+                    id = id,
+                    name = o.optString("name", ""),
+                    type = o.optString("type").takeIf { it.isNotEmpty() },
+                    clientName = o.optString("client_name").takeIf { it.isNotEmpty() }
+                )
+            )
+        }
+        return result
     }
 }
 

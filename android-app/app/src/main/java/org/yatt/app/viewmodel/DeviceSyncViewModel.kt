@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.yatt.app.data.local.ProjectEntity
 import org.yatt.app.data.repository.DeviceSyncRepository
 
 data class DeviceSyncUiState(
@@ -48,8 +49,11 @@ class DeviceSyncViewModel(
         viewModelScope.launch {
             state.value = state.value.copy(loading = true, error = null, success = null)
             try {
-                val timers = deviceSyncRepository.joinSession(syncCode)
-                deviceSyncRepository.completeImport(timers)
+                val result = deviceSyncRepository.joinSession(syncCode)
+                val projectEntities = result.projects?.map { p ->
+                    ProjectEntity(id = p.id, name = p.name, type = p.type, clientName = p.clientName)
+                }
+                deviceSyncRepository.completeImport(result.timers, projectEntities, result.preferences)
                 state.value = state.value.copy(loading = false, success = "Sync complete")
             } catch (ex: Exception) {
                 state.value = state.value.copy(loading = false, error = ex.message)
@@ -73,8 +77,8 @@ class DeviceSyncViewModel(
         viewModelScope.launch {
             state.value = state.value.copy(loading = true, error = null, success = null)
             try {
-                val timers = deviceSyncRepository.importData(encoded)
-                deviceSyncRepository.completeImport(timers)
+                val result = deviceSyncRepository.importData(encoded)
+                deviceSyncRepository.completeImport(result.timers, result.projects, result.preferences)
                 state.value = state.value.copy(loading = false, success = "Import complete")
             } catch (ex: Exception) {
                 state.value = state.value.copy(loading = false, error = ex.message)
@@ -94,11 +98,12 @@ class DeviceSyncViewModel(
             state.value = state.value.copy(polling = true)
             while (true) {
                 try {
-                    val (status, timers) = deviceSyncRepository.pollStatus(syncCode)
-                    if (status == "joined") {
-                        if (timers.isNotEmpty()) {
-                            deviceSyncRepository.completeImport(timers)
+                    val result = deviceSyncRepository.getSyncStatus(syncCode)
+                    if (result.status == "joined" && result.timers != null) {
+                        val projectEntities = result.projects?.map { p ->
+                            ProjectEntity(id = p.id, name = p.name, type = p.type, clientName = p.clientName)
                         }
+                        deviceSyncRepository.completeImport(result.timers, projectEntities, result.preferences)
                         state.value = state.value.copy(
                             polling = false,
                             success = "Sync complete"

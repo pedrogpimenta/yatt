@@ -11,7 +11,7 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
                 AuthViewModel(container.authRepository) as T
             }
             modelClass.isAssignableFrom(TimerViewModel::class.java) -> {
-                TimerViewModel(container.timerRepository, container.settingsStore) as T
+                TimerViewModel(container.timerRepository, container.projectsRepository, container.settingsStore) as T
             }
             modelClass.isAssignableFrom(SettingsViewModel::class.java) -> {
                 SettingsViewModel(
@@ -24,7 +24,7 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
                 DeviceSyncViewModel(container.deviceSyncRepository) as T
             }
             modelClass.isAssignableFrom(ProjectsViewModel::class.java) -> {
-                ProjectsViewModel(container.apiService) as T
+                ProjectsViewModel(container.projectsRepository) as T
             }
             else -> throw IllegalArgumentException("Unknown ViewModel class")
         }

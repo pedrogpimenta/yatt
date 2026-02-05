@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -54,7 +55,7 @@ fun SettingsScreen(
     onOpenProjects: () -> Unit = {}
 ) {
     val preferences by settingsViewModel.preferencesFlow.collectAsState(
-        initial = UserPreferences("dd/MM/yyyy", "24h", 0, "https://time-server.command.pimenta.pt/")
+        initial = UserPreferences("dd/MM/yyyy", "24h", 0)
     )
     val token by settingsViewModel.authTokenFlow.collectAsState(initial = null)
     val localMode by settingsViewModel.localModeFlow.collectAsState(initial = false)
@@ -62,7 +63,6 @@ fun SettingsScreen(
 
     var showToken by remember { mutableStateOf(false) }
     var showLogoutConfirm by remember { mutableStateOf(false) }
-    var apiUrl by remember { mutableStateOf(preferences.apiBaseUrl) }
 
     val clipboard = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
@@ -71,10 +71,6 @@ fun SettingsScreen(
         if (!localMode) {
             settingsViewModel.loadUser()
         }
-    }
-
-    LaunchedEffect(preferences.apiBaseUrl) {
-        apiUrl = preferences.apiBaseUrl
     }
 
     if (showLogoutConfirm) {
@@ -145,30 +141,15 @@ fun SettingsScreen(
 
             Divider()
 
-            Text("API", style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(
-                value = apiUrl,
-                onValueChange = { apiUrl = it },
-                label = { Text("API base URL") },
-                modifier = Modifier.fillMaxWidth()
+            Text("Projects", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Manage projects and clients for your timers.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Button(onClick = { settingsViewModel.setApiBaseUrl(apiUrl) }) {
-                Text("Save API URL")
-            }
-
-            Divider()
-
-            if (!localMode) {
-                Text("Projects", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Manage projects and clients for your timers.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = onOpenProjects) {
-                    Text("Manage projects")
-                }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = onOpenProjects) {
+                Text("Manage projects")
             }
 
             Divider()
@@ -184,13 +165,43 @@ fun SettingsScreen(
             Divider()
 
             Text("Export", style = MaterialTheme.typography.titleMedium)
-            Button(onClick = {
-                coroutineScope.launch {
-                    val csv = settingsViewModel.exportCsv()
-                    clipboard.setText(AnnotatedString(csv))
+            Text(
+                "Download your timer data as a CSV file for use in spreadsheets.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    coroutineScope.launch {
+                        val csv = settingsViewModel.exportCsv()
+                        clipboard.setText(AnnotatedString(csv))
+                    }
+                }) {
+                    Text("Copy CSV to clipboard")
                 }
-            }) {
-                Text("Copy CSV to clipboard")
+                val context = LocalContext.current
+                Button(onClick = {
+                    coroutineScope.launch {
+                        val csv = settingsViewModel.exportCsv()
+                        val filename = "yatt-export-${java.time.LocalDate.now()}.csv"
+                        val file = java.io.File(context.cacheDir, filename)
+                        file.writeText(csv, Charsets.UTF_8)
+                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            file
+                        )
+                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/csv"
+                            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(android.content.Intent.createChooser(intent, "Share CSV"))
+                    }
+                }) {
+                    Text("Download CSV")
+                }
             }
 
             Divider()

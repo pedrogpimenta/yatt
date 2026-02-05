@@ -10,9 +10,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,15 +28,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import org.yatt.app.data.UserPreferences
+import org.yatt.app.data.model.ProjectItem
 import org.yatt.app.util.TimeUtils
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ManualEntryDialog(
     preferences: UserPreferences,
-    onSave: (Instant, Instant, String?, String?) -> Unit,
+    projects: List<ProjectItem> = emptyList(),
+    onSave: (Instant, Instant, String?, String?, String?, String?, String?) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -42,6 +50,8 @@ fun ManualEntryDialog(
     var endTime by remember { mutableStateOf(LocalTime.of(10, 0)) }
     var tag by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    var selectedProjectId by remember { mutableStateOf<String?>(null) }
+    var projectMenuExpanded by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     fun openStartDatePicker() {
@@ -130,6 +140,37 @@ fun ManualEntryDialog(
                     minLines = 2
                 )
 
+                Spacer(modifier = Modifier.height(12.dp))
+                val selectedProject = projects.find { it.id == selectedProjectId }
+                ExposedDropdownMenuBox(
+                    expanded = projectMenuExpanded,
+                    onExpandedChange = { projectMenuExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedProject?.formatLabel() ?: "Project (optional)",
+                        onValueChange = {},
+                        label = { Text("Project (optional)") },
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = projectMenuExpanded) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor()
+                    )
+                    DropdownMenu(
+                        expanded = projectMenuExpanded,
+                        onDismissRequest = { projectMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("None") },
+                            onClick = { selectedProjectId = null; projectMenuExpanded = false }
+                        )
+                        projects.forEach { p ->
+                            DropdownMenuItem(
+                                text = { Text(p.formatLabel()) },
+                                onClick = { selectedProjectId = p.id; projectMenuExpanded = false }
+                            )
+                        }
+                    }
+                }
+
                 if (!error.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(error ?: "", color = MaterialTheme.colorScheme.error)
@@ -144,7 +185,15 @@ fun ManualEntryDialog(
                     error = "End time must be after start time"
                 } else {
                     error = null
-                    onSave(start, end, tag.trim().ifBlank { null }, description.trim().ifBlank { null })
+                    val project = projects.find { it.id == selectedProjectId }
+                    onSave(
+                        start, end,
+                        tag.trim().ifBlank { null },
+                        description.trim().ifBlank { null },
+                        selectedProjectId,
+                        project?.name,
+                        project?.clientName
+                    )
                 }
             }) {
                 Text("Add entry")

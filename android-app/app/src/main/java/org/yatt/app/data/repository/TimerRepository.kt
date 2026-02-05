@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.yatt.app.data.SettingsStore
+import org.yatt.app.data.local.ProjectDao
 import org.yatt.app.data.local.SyncOperationEntity
 import org.yatt.app.data.local.SyncQueueDao
 import org.yatt.app.data.local.TimerDao
@@ -23,6 +24,7 @@ class TimerRepository(
     private val apiService: ApiService,
     private val timerDao: TimerDao,
     private val syncQueueDao: SyncQueueDao,
+    private val projectDao: ProjectDao,
     private val settingsStore: SettingsStore,
     private val connectivityObserver: ConnectivityObserver,
     private val notificationController: NotificationController
@@ -51,7 +53,10 @@ class TimerRepository(
         tag: String?,
         startTime: String = Instant.now().toString(),
         endTime: String? = null,
-        description: String? = null
+        description: String? = null,
+        projectId: String? = null,
+        projectName: String? = null,
+        clientName: String? = null
     ): TimerEntity = withContext(Dispatchers.IO) {
         if (isLocalMode()) {
             val local = TimerEntity(
@@ -59,7 +64,10 @@ class TimerRepository(
                 startTime = startTime,
                 endTime = endTime,
                 tag = tag,
-                description = description
+                description = description,
+                projectId = projectId,
+                projectName = projectName,
+                clientName = clientName
             )
             timerDao.saveTimer(local)
             notifyRunning(local)
@@ -68,7 +76,7 @@ class TimerRepository(
 
         if (isOnline()) {
             return@withContext try {
-                val created = apiService.createTimer(startTime, endTime, tag, description)
+                val created = apiService.createTimer(startTime, endTime, tag, description, projectId)
                 timerDao.saveTimer(created)
                 notifyRunning(created)
                 created
@@ -78,14 +86,17 @@ class TimerRepository(
                     startTime = startTime,
                     endTime = endTime,
                     tag = tag,
-                    description = description
+                    description = description,
+                    projectId = projectId,
+                    projectName = projectName,
+                    clientName = clientName
                 )
                 timerDao.saveTimer(local)
                 enqueueSync(
                     type = SyncType.CREATE,
                     timerId = null,
                     localId = local.id,
-                    data = jsonData(startTime, endTime, tag, description)
+                    data = jsonData(startTime, endTime, tag, description, projectId)
                 )
                 notifyRunning(local)
                 local
@@ -97,20 +108,23 @@ class TimerRepository(
             startTime = startTime,
             endTime = endTime,
             tag = tag,
-            description = description
+            description = description,
+            projectId = projectId,
+            projectName = projectName,
+            clientName = clientName
         )
         timerDao.saveTimer(local)
         enqueueSync(
             type = SyncType.CREATE,
             timerId = null,
             localId = local.id,
-            data = jsonData(startTime, endTime, tag, description)
+            data = jsonData(startTime, endTime, tag, description, projectId)
         )
         notifyRunning(local)
         return@withContext local
     }
 
-    suspend fun updateTimer(id: String, startTime: String?, endTime: String?, tag: String?, description: String? = null): TimerEntity? =
+    suspend fun updateTimer(id: String, startTime: String?, endTime: String?, tag: String?, description: String? = null, projectId: String? = null): TimerEntity? =
         withContext(Dispatchers.IO) {
             val existing = timerDao.getTimer(id)
             if (existing != null) {
@@ -118,7 +132,10 @@ class TimerRepository(
                     startTime = startTime ?: existing.startTime,
                     endTime = endTime ?: existing.endTime,
                     tag = tag ?: existing.tag,
-                    description = if (description != null) description else existing.description
+                    description = if (description != null) description else existing.description,
+                    projectId = projectId ?: existing.projectId,
+                    projectName = existing.projectName,
+                    clientName = existing.clientName
                 )
                 timerDao.saveTimer(updated)
                 if (updated.endTime == null) {
@@ -137,7 +154,7 @@ class TimerRepository(
 
             if (isOnline() && !isLocalId(id)) {
                 return@withContext try {
-                    val updated = apiService.updateTimer(id, startTime, endTime, tag, description)
+                    val updated = apiService.updateTimer(id, startTime, endTime, tag, description, projectId)
                     timerDao.saveTimer(updated)
                     if (updated.endTime == null) {
                         val timers = timerDao.getTimers()
@@ -153,7 +170,7 @@ class TimerRepository(
                         type = SyncType.UPDATE,
                         timerId = id,
                         localId = null,
-                        data = jsonData(startTime, endTime, tag, description)
+                        data = jsonData(startTime, endTime, tag, description, projectId)
                     )
                     timerDao.getTimer(id)
                 }
@@ -163,7 +180,7 @@ class TimerRepository(
                 type = SyncType.UPDATE,
                 timerId = id,
                 localId = null,
-                data = jsonData(startTime, endTime, tag, description)
+                data = jsonData(startTime, endTime, tag, description, projectId)
             )
             return@withContext timerDao.getTimer(id)
         }
@@ -256,10 +273,13 @@ class TimerRepository(
                 when (operation.type) {
                     SyncType.CREATE -> {
                         val data = JSONObject(operation.data ?: "{}")
+                        val projectId = stringOrNull(data, "project_id")
                         val created = apiService.createTimer(
                             startTime = data.getString("start_time"),
                             endTime = stringOrNull(data, "end_time"),
-                            tag = stringOrNull(data, "tag")
+                            tag = stringOrNull(data, "tag"),
+                            description = stringOrNull(data, "description"),
+                            projectId = projectId
                         )
                         if (!operation.localId.isNullOrBlank()) {
                             idMapping[operation.localId] = created.id
@@ -274,7 +294,9 @@ class TimerRepository(
                             id = targetId,
                             startTime = stringOrNull(data, "start_time"),
                             endTime = stringOrNull(data, "end_time"),
-                            tag = stringOrNull(data, "tag")
+                            tag = stringOrNull(data, "tag"),
+                            description = stringOrNull(data, "description"),
+                            projectId = stringOrNull(data, "project_id")
                         )
                     }
                     SyncType.STOP -> {
@@ -312,26 +334,37 @@ class TimerRepository(
 
     suspend fun exportCsv(): String = withContext(Dispatchers.IO) {
         val timers = timerDao.getTimers()
+        val projects = projectDao.getAll().associateBy { it.id }
+        val prefs = settingsStore.preferencesFlow.first()
         val rows = ArrayList<String>(timers.size + 1)
-        rows.add("ID,Tag,Start Time,End Time,Duration")
+        rows.add("ID,Tag,Project,Description,Start Time,End Time,Duration")
         timers.sortedByDescending { it.startTime }.forEach { timer ->
-            val start = timer.startTime
-            val end = timer.endTime
-            val duration = if (end != null) {
-                val durationValue = java.time.Duration.between(
-                    Instant.parse(start),
-                    Instant.parse(end)
-                )
-                TimeUtils.formatDuration(durationValue)
-            } else {
-                ""
+            val startInstant = Instant.parse(timer.startTime)
+            val endInstant = timer.endTime?.let { Instant.parse(it) }
+            val duration = if (endInstant != null) {
+                TimeUtils.formatDuration(java.time.Duration.between(startInstant, endInstant))
+            } else ""
+            val projectLabel = when {
+                timer.projectName != null && timer.clientName != null -> "${timer.projectName} - ${timer.clientName}"
+                timer.projectName != null -> timer.projectName
+                timer.projectId != null -> {
+                    val p = projects[timer.projectId]
+                    if (p != null) {
+                        listOf(p.name, p.type, p.clientName).filterNotNull().filter { it.isNotBlank() }.joinToString(" - ")
+                    } else ""
+                }
+                else -> ""
             }
+            val startFormatted = "${TimeUtils.formatDate(startInstant, prefs.dateFormat)} ${TimeUtils.formatTime(startInstant, prefs.timeFormat)}"
+            val endFormatted = endInstant?.let { "${TimeUtils.formatDate(it, prefs.dateFormat)} ${TimeUtils.formatTime(it, prefs.timeFormat)}" } ?: ""
             rows.add(
                 listOf(
                     csvEscape(timer.id),
                     csvEscape(timer.tag ?: ""),
-                    csvEscape(start),
-                    csvEscape(end ?: ""),
+                    csvEscape(projectLabel),
+                    csvEscape(timer.description ?: ""),
+                    csvEscape(startFormatted),
+                    csvEscape(endFormatted),
                     csvEscape(duration)
                 ).joinToString(",")
             )
@@ -355,12 +388,13 @@ class TimerRepository(
         syncQueueDao.add(operation)
     }
 
-    private fun jsonData(startTime: String?, endTime: String?, tag: String?, description: String? = null): String {
+    private fun jsonData(startTime: String?, endTime: String?, tag: String?, description: String? = null, projectId: String? = null): String {
         val json = JSONObject()
         if (startTime != null) json.put("start_time", startTime)
         if (endTime != null) json.put("end_time", endTime)
         if (tag != null) json.put("tag", tag)
         if (description != null) json.put("description", description)
+        if (projectId != null) json.put("project_id", projectId.toLongOrNull() ?: projectId)
         return json.toString()
     }
 

@@ -10,6 +10,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -25,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import org.yatt.app.data.UserPreferences
 import org.yatt.app.data.local.TimerEntity
+import org.yatt.app.data.model.ProjectItem
 import org.yatt.app.util.TimeUtils
 import java.time.Instant
 import java.time.LocalDate
@@ -32,11 +38,13 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimerEditDialog(
     timer: TimerEntity,
     preferences: UserPreferences,
-    onSave: (Instant, Instant?, String?, String?) -> Unit,
+    projects: List<ProjectItem> = emptyList(),
+    onSave: (Instant, Instant?, String?, String?, String?) -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -54,6 +62,8 @@ fun TimerEditDialog(
 
     var tag by remember { mutableStateOf(timer.tag.orEmpty()) }
     var description by remember { mutableStateOf(timer.description.orEmpty()) }
+    var selectedProjectId by remember(timer) { mutableStateOf(timer.projectId) }
+    var projectMenuExpanded by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
@@ -134,6 +144,39 @@ fun TimerEditDialog(
                     minLines = 2
                 )
 
+                if (projects.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    val selectedProject = projects.find { it.id == selectedProjectId }
+                    ExposedDropdownMenuBox(
+                        expanded = projectMenuExpanded,
+                        onExpandedChange = { projectMenuExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedProject?.formatLabel() ?: "None",
+                            onValueChange = {},
+                            label = { Text("Project (optional)") },
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = projectMenuExpanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor()
+                        )
+                        DropdownMenu(
+                            expanded = projectMenuExpanded,
+                            onDismissRequest = { projectMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("None") },
+                                onClick = { selectedProjectId = null; projectMenuExpanded = false }
+                            )
+                            projects.forEach { p ->
+                                DropdownMenuItem(
+                                    text = { Text(p.formatLabel()) },
+                                    onClick = { selectedProjectId = p.id; projectMenuExpanded = false }
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text("Start", style = MaterialTheme.typography.labelLarge)
@@ -185,7 +228,7 @@ fun TimerEditDialog(
                     error = "End time must be after start time"
                 } else {
                     error = null
-                    onSave(start, end, tag.trim().ifBlank { null }, description.trim().ifBlank { null })
+                    onSave(start, end, tag.trim().ifBlank { null }, description.trim().ifBlank { null }, selectedProjectId)
                 }
             }) {
                 Text("Save")

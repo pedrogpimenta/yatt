@@ -17,15 +17,13 @@ private val Context.dataStore by preferencesDataStore(name = "yatt_settings")
 data class UserPreferences(
     val dateFormat: String,
     val timeFormat: String,
-    val dayStartHour: Int,
-    val apiBaseUrl: String
+    val dayStartHour: Int
 )
 
 class SettingsStore(private val context: Context) {
     private val dataStore = context.dataStore
 
     private object Keys {
-        val apiBaseUrl = stringPreferencesKey("api_base_url")
         val authToken = stringPreferencesKey("auth_token")
         val localMode = booleanPreferencesKey("local_mode")
         val deviceId = stringPreferencesKey("device_id")
@@ -38,8 +36,7 @@ class SettingsStore(private val context: Context) {
         UserPreferences(
             dateFormat = prefs[Keys.dateFormat] ?: "dd/MM/yyyy",
             timeFormat = prefs[Keys.timeFormat] ?: "24h",
-            dayStartHour = prefs[Keys.dayStartHour] ?: 0,
-            apiBaseUrl = prefs[Keys.apiBaseUrl] ?: "https://time-server.command.pimenta.pt/"
+            dayStartHour = prefs[Keys.dayStartHour] ?: 0
         )
     }
 
@@ -48,10 +45,6 @@ class SettingsStore(private val context: Context) {
     val localModeFlow: Flow<Boolean> = dataStore.data.map { it[Keys.localMode] ?: false }
 
     val deviceIdFlow: Flow<String?> = dataStore.data.map { it[Keys.deviceId] }
-
-    suspend fun setApiBaseUrl(value: String) {
-        dataStore.edit { it[Keys.apiBaseUrl] = value.trim() }
-    }
 
     suspend fun setAuthToken(token: String) {
         dataStore.edit { it[Keys.authToken] = token }
