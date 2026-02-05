@@ -30,8 +30,10 @@ fun TimerListItem(
     val start = TimeUtils.parseInstant(timer.startTime)
     val end = timer.endTime?.let { TimeUtils.parseInstant(it) }
     val duration = Duration.between(start, end ?: now)
-    val tagLabel = timer.tag?.ifBlank { "No tag" } ?: "No tag"
+    val primaryLabel = timer.tag?.takeIf { it.isNotBlank() }
+        ?: listOfNotNull(timer.projectName, timer.clientName).joinToString(" · ").takeIf { it.isNotEmpty() }
     val dateLabel = TimeUtils.formatDateLabel(start, preferences.dateFormat, preferences.dayStartHour)
+    val descriptionText = timer.description?.takeIf { it.isNotBlank() }
     val timeRange = buildString {
         append(TimeUtils.formatTime(start, preferences.timeFormat))
         append(" - ")
@@ -56,10 +58,16 @@ fun TimerListItem(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = tagLabel, style = MaterialTheme.typography.titleMedium)
-                Spacer(modifier = Modifier.height(4.dp))
+                if (primaryLabel != null) {
+                    Text(text = primaryLabel, style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
                 Text(text = dateLabel, style = MaterialTheme.typography.bodySmall)
                 Text(text = timeRange, style = MaterialTheme.typography.bodySmall)
+                if (descriptionText != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(text = descriptionText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             Text(
                 text = TimeUtils.formatDuration(duration),

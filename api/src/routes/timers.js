@@ -15,14 +15,46 @@ function broadcast(req, event, data) {
   }
 }
 
-// Get all timers for current user
+// Enrich a timer row with project_name and client_name for display
+function enrichTimer(timer) {
+  if (!timer) return null;
+  const row = db.prepare(`
+    SELECT t.id, t.user_id, t.start_time, t.end_time, t.tag, t.description, t.project_id,
+           p.name AS project_name, c.name AS client_name
+    FROM timers t
+    LEFT JOIN projects p ON t.project_id = p.id AND p.user_id = t.user_id
+    LEFT JOIN clients c ON p.client_id = c.id
+    WHERE t.id = ?
+  `).get(timer.id);
+  if (!row) return timer;
+  return {
+    ...timer,
+    project_name: row.project_name ?? null,
+    client_name: row.client_name ?? null
+  };
+}
+
+// Get all timers for current user (with project and client names for display)
 router.get('/', (req, res) => {
   try {
-    const timers = db.prepare(`
-      SELECT * FROM timers 
-      WHERE user_id = ? 
-      ORDER BY start_time DESC
+    const rows = db.prepare(`
+      SELECT t.id, t.user_id, t.start_time, t.end_time, t.tag, t.description, t.project_id,
+             p.name AS project_name, c.name AS client_name
+      FROM timers t
+      LEFT JOIN projects p ON t.project_id = p.id AND p.user_id = t.user_id
+      LEFT JOIN clients c ON p.client_id = c.id
+      WHERE t.user_id = ?
+      ORDER BY t.start_time DESC
     `).all(req.userId);
+
+    const timers = rows.map((row) => {
+      const { project_name, client_name, ...timer } = row;
+      return {
+        ...timer,
+        project_name: project_name ?? null,
+        client_name: client_name ?? null
+      };
+    });
 
     res.json(timers);
   } catch (err) {
@@ -59,7 +91,7 @@ router.get('/:id', (req, res) => {
       return res.status(404).json({ error: 'Timer not found' });
     }
 
-    res.json(timer);
+    res.json(enrichTimer(timer));
   } catch (err) {
     console.error('Get timer error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -69,18 +101,31 @@ router.get('/:id', (req, res) => {
 // Start a new timer
 router.post('/', (req, res) => {
   try {
-    const { start_time, end_time, tag } = req.body;
+    const { start_time, end_time, tag, description, project_id } = req.body;
     const startTime = start_time || new Date().toISOString();
+    let projectId = null;
+
+    if (project_id !== null && project_id !== undefined && project_id !== '') {
+      const parsedProjectId = Number(project_id);
+      if (!Number.isInteger(parsedProjectId)) {
+        return res.status(400).json({ error: 'Invalid project_id' });
+      }
+      const project = db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(parsedProjectId, req.userId);
+      if (!project) {
+        return res.status(400).json({ error: 'Project not found' });
+      }
+      projectId = parsedProjectId;
+    }
 
     const result = db.prepare(`
-      INSERT INTO timers (user_id, start_time, end_time, tag) 
-      VALUES (?, ?, ?, ?)
-    `).run(req.userId, startTime, end_time || null, tag || null);
+      INSERT INTO timers (user_id, start_time, end_time, tag, description, project_id) 
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(req.userId, startTime, end_time || null, tag || null, description || null, projectId);
 
     const timer = db.prepare('SELECT * FROM timers WHERE id = ?').get(result.lastInsertRowid);
 
     broadcast(req, 'created', timer);
-    res.status(201).json(timer);
+    res.status(201).json(enrichTimer(timer));
   } catch (err) {
     console.error('Create timer error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -96,20 +141,62 @@ router.patch('/:id', (req, res) => {
       return res.status(404).json({ error: 'Timer not found' });
     }
 
-    const { start_time, end_time, tag } = req.body;
-    
-    db.prepare(`
-      UPDATE timers 
-      SET start_time = COALESCE(?, start_time),
-          end_time = COALESCE(?, end_time),
-          tag = COALESCE(?, tag)
-      WHERE id = ? AND user_id = ?
-    `).run(start_time, end_time, tag, req.params.id, req.userId);
+    const { start_time, end_time, tag, description, project_id } = req.body;
+
+    let projectId;
+    if (Object.prototype.hasOwnProperty.call(req.body, 'project_id')) {
+      if (project_id === null || project_id === '') {
+        projectId = null;
+      } else {
+        const parsedProjectId = Number(project_id);
+        if (!Number.isInteger(parsedProjectId)) {
+          return res.status(400).json({ error: 'Invalid project_id' });
+        }
+        const project = db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(parsedProjectId, req.userId);
+        if (!project) {
+          return res.status(400).json({ error: 'Project not found' });
+        }
+        projectId = parsedProjectId;
+      }
+    }
+
+    const updates = [];
+    const params = [];
+
+    if (start_time !== undefined) {
+      updates.push('start_time = ?');
+      params.push(start_time);
+    }
+    if (end_time !== undefined) {
+      updates.push('end_time = ?');
+      params.push(end_time);
+    }
+    if (tag !== undefined) {
+      updates.push('tag = ?');
+      params.push(tag);
+    }
+    if (description !== undefined) {
+      updates.push('description = ?');
+      params.push(description === '' || description === null ? null : description);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'project_id')) {
+      updates.push('project_id = ?');
+      params.push(projectId);
+    }
+
+    if (updates.length > 0) {
+      params.push(req.params.id, req.userId);
+      db.prepare(`
+        UPDATE timers 
+        SET ${updates.join(', ')}
+        WHERE id = ? AND user_id = ?
+      `).run(...params);
+    }
 
     const updatedTimer = db.prepare('SELECT * FROM timers WHERE id = ?').get(req.params.id);
 
     broadcast(req, 'updated', updatedTimer);
-    res.json(updatedTimer);
+    res.json(enrichTimer(updatedTimer));
   } catch (err) {
     console.error('Update timer error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -135,7 +222,7 @@ router.post('/:id/stop', (req, res) => {
     const updatedTimer = db.prepare('SELECT * FROM timers WHERE id = ?').get(req.params.id);
 
     broadcast(req, 'stopped', updatedTimer);
-    res.json(updatedTimer);
+    res.json(enrichTimer(updatedTimer));
   } catch (err) {
     console.error('Stop timer error:', err);
     res.status(500).json({ error: 'Server error' });

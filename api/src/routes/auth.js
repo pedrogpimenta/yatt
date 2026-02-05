@@ -6,6 +6,17 @@ const { JWT_SECRET, authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 
+function normalizeDayStartHour(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 23) {
+    return null;
+  }
+  return parsed;
+}
+
 // Register
 router.post('/register', async (req, res) => {
   try {
@@ -67,13 +78,52 @@ router.post('/login', async (req, res) => {
 // Get current user (protected)
 router.get('/me', authMiddleware, (req, res) => {
   try {
-    const user = db.prepare('SELECT id, email, created_at FROM users WHERE id = ?').get(req.userId);
+    const user = db.prepare('SELECT id, email, created_at, day_start_hour FROM users WHERE id = ?').get(req.userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    res.json(user);
+    res.json({
+      id: user.id,
+      email: user.email,
+      created_at: user.created_at,
+      dayStartHour: user.day_start_hour ?? 0
+    });
   } catch (err) {
     console.error('Get user error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get user preferences (protected)
+router.get('/preferences', authMiddleware, (req, res) => {
+  try {
+    const user = db.prepare('SELECT day_start_hour FROM users WHERE id = ?').get(req.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({ dayStartHour: user.day_start_hour ?? 0 });
+  } catch (err) {
+    console.error('Get preferences error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update user preferences (protected)
+router.patch('/preferences', authMiddleware, (req, res) => {
+  try {
+    const dayStartHour = normalizeDayStartHour(req.body?.dayStartHour);
+    if (dayStartHour === null) {
+      return res.status(400).json({ error: 'dayStartHour must be an integer between 0 and 23' });
+    }
+
+    const result = db.prepare('UPDATE users SET day_start_hour = ? WHERE id = ?').run(dayStartHour, req.userId);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ dayStartHour });
+  } catch (err) {
+    console.error('Update preferences error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });

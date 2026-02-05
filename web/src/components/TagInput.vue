@@ -130,7 +130,8 @@ function onKeydown(e) {
   border-radius: 10px;
   color: var(--text-primary);
   font-size: 0.875rem;
-  text-align: center;
+  text-align: left;
+  box-sizing: border-box;
 }
 
 .tag-input:focus {

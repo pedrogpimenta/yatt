@@ -11,12 +11,30 @@ import {
   getTimePlaceholder,
   getDatePlaceholder
 } from '../preferences.js'
+import ProjectSelector from './ProjectSelector.vue'
+import { formatProjectLabel } from '../projects.js'
 
 const props = defineProps({
-  timer: Object
+  timer: Object,
+  projects: {
+    type: Array,
+    default: () => []
+  },
+  clients: {
+    type: Array,
+    default: () => []
+  },
+  onCreateProject: {
+    type: Function,
+    default: null
+  },
+  startInEditMode: {
+    type: Boolean,
+    default: false
+  }
 })
 
-const emit = defineEmits(['update', 'delete'])
+const emit = defineEmits(['update', 'delete', 'cancel', 'openCreateForm'])
 
 function handleKeydown(e) {
   if (e.key === 'Escape' && isEditing.value) {
@@ -27,6 +45,9 @@ function handleKeydown(e) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown, true)
+  if (props.startInEditMode && props.timer) {
+    startEdit()
+  }
 })
 
 onUnmounted(() => {
@@ -35,6 +56,8 @@ onUnmounted(() => {
 
 const isEditing = ref(false)
 const editTag = ref('')
+const editDescription = ref('')
+const editProjectId = ref(null)
 const editStartDate = ref('')
 const editStartTime = ref('')
 const editEndDate = ref('')
@@ -48,6 +71,16 @@ const duration = computed(() => {
     ? new Date(props.timer.end_time).getTime() 
     : Date.now()
   return end - start
+})
+
+function findProjectById(id) {
+  if (id === null || id === undefined) return null
+  return props.projects.find((project) => String(project.id) === String(id)) || null
+}
+
+const projectDisplay = computed(() => {
+  const project = findProjectById(props.timer.project_id)
+  return project ? formatProjectLabel(project) : ''
 })
 
 function formatDuration(ms) {
@@ -104,6 +137,8 @@ function toISODate(isoString) {
 
 function startEdit() {
   editTag.value = props.timer.tag || ''
+  editDescription.value = props.timer.description || ''
+  editProjectId.value = props.timer.project_id ?? null
   // Date uses preference format for display
   editStartDate.value = formatDateForInput(props.timer.start_time)
   hiddenStartDate.value = toISODate(props.timer.start_time)
@@ -175,6 +210,7 @@ function onEndDateInput() {
 function cancelEdit() {
   isEditing.value = false
   editError.value = ''
+  emit('cancel')
 }
 
 function saveEdit() {
@@ -219,8 +255,10 @@ function saveEdit() {
   
   emit('update', props.timer.id, {
     tag: editTag.value || null,
+    description: editDescription.value?.trim() || null,
     start_time: startDateTime.toISOString(),
-    end_time: endTime
+    end_time: endTime,
+    project_id: editProjectId.value ?? null
   })
   isEditing.value = false
 }
@@ -238,8 +276,11 @@ function deleteTimer() {
     <template v-if="!isEditing">
       <div class="timer-main" @click="startEdit">
         <div class="timer-info">
-          <span class="timer-tag" v-if="timer.tag">{{ timer.tag }}</span>
-          <span class="timer-tag empty" v-else>No tag</span>
+          <div class="timer-labels">
+            <span class="timer-tag" v-if="timer.tag">{{ timer.tag }}</span>
+            <span class="timer-project" v-if="projectDisplay">{{ projectDisplay }}</span>
+            <p class="timer-description" v-if="timer.description">{{ timer.description }}</p>
+          </div>
           <span class="timer-date">{{ displayDate }}</span>
         </div>
         <div class="timer-times">
@@ -260,6 +301,23 @@ function deleteTimer() {
         <div class="edit-row">
           <label>Tag</label>
           <input v-model="editTag" type="text" placeholder="Tag (optional)" />
+        </div>
+
+        <div class="edit-row">
+          <label>Description</label>
+          <textarea v-model="editDescription" placeholder="Optional description..." rows="2" class="edit-description-input"></textarea>
+        </div>
+
+        <div class="edit-row">
+          <label>Project</label>
+          <ProjectSelector
+            v-model="editProjectId"
+            :projects="projects"
+            :clients="clients"
+            :onCreate="onCreateProject"
+            placeholder="Select project..."
+            @open-create-form="emit('openCreateForm')"
+          />
         </div>
         
         <div class="edit-row">
@@ -350,9 +408,17 @@ function deleteTimer() {
 
 .timer-info {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
   margin-bottom: 0.25rem;
+}
+
+.timer-labels {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .timer-tag {
@@ -363,6 +429,32 @@ function deleteTimer() {
 .timer-tag.empty {
   color: var(--text-muted);
   font-style: italic;
+}
+
+.timer-project {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.timer-description {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin: 0.25rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.edit-description-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 60px;
 }
 
 .timer-date {

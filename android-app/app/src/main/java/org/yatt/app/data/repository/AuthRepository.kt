@@ -16,12 +16,23 @@ class AuthRepository(
         val token = apiService.login(email, password)
         settingsStore.setAuthToken(token)
         settingsStore.setLocalMode(false)
+        syncDayStartFromServer()
     }
 
     suspend fun register(email: String, password: String) {
         val token = apiService.register(email, password)
         settingsStore.setAuthToken(token)
         settingsStore.setLocalMode(false)
+        syncDayStartFromServer()
+    }
+
+    private suspend fun syncDayStartFromServer() {
+        try {
+            val dayStartHour = apiService.getPreferences()
+            settingsStore.setDayStartHour(dayStartHour)
+        } catch (_: Exception) {
+            // Keep local value if fetch fails
+        }
     }
 
     suspend fun enableLocalMode() {
@@ -32,6 +43,12 @@ class AuthRepository(
 
     suspend fun getMe(): UserProfile {
         return apiService.getMe()
+    }
+
+    suspend fun getPreferences(): Int = apiService.getPreferences()
+
+    suspend fun updatePreferences(dayStartHour: Int) {
+        apiService.updatePreferences(dayStartHour)
     }
 
     suspend fun changePassword(currentPassword: String, newPassword: String) {

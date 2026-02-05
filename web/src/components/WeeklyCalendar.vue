@@ -1,9 +1,11 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { preferences, formatTime, formatDate } from '../preferences.js'
+import { formatProjectLabel } from '../projects.js'
 
 const props = defineProps({
   timers: Array,
+  projects: { type: Array, default: () => [] },
   currentElapsed: Number
 })
 
@@ -70,6 +72,8 @@ function getTimersForDay(dayDate) {
   const dayEnd = new Date(dayDate)
   dayEnd.setHours(23, 59, 59, 999)
   
+  const projectList = props.projects || []
+  const findProject = (id) => projectList.find(p => String(p.id) === String(id)) || null
   return weekTimers.value.filter(timer => {
     const start = new Date(timer.start_time)
     const end = timer.end_time ? new Date(timer.end_time) : new Date()
@@ -87,13 +91,16 @@ function getTimersForDay(dayDate) {
     const top = (startMinutes / (24 * 60)) * 100
     const height = ((endMinutes - startMinutes) / (24 * 60)) * 100
     
+    const project = findProject(timer.project_id)
+    const projectDisplay = project ? formatProjectLabel(project) : ''
     return {
       ...timer,
       top: `${top}%`,
       height: `${Math.max(height, 0.5)}%`,
       isRunning: !timer.end_time,
       displayStart,
-      displayEnd
+      displayEnd,
+      projectDisplay
     }
   })
 }
@@ -134,6 +141,12 @@ function goToToday() {
 
 function selectTimer(timer) {
   emit('select', timer)
+}
+
+function tooltipTitle(timer) {
+  const parts = [timer.tag, timer.projectDisplay].filter(Boolean)
+  const timeStr = `${formatTimeDisplay(timer.displayStart)} - ${timer.isRunning ? 'Running' : formatTimeDisplay(timer.displayEnd)}`
+  return parts.length ? `${parts.join('\n')}\n${timeStr}` : timeStr
 }
 
 const weekLabel = computed(() => {
@@ -209,9 +222,10 @@ const weekLabel = computed(() => {
                   :class="{ running: timer.isRunning }"
                   :style="{ top: timer.top, height: timer.height }"
                   @click="selectTimer(timer)"
-                  :title="`${timer.tag || 'No tag'}\n${formatTimeDisplay(timer.displayStart)} - ${timer.isRunning ? 'Running' : formatTimeDisplay(timer.displayEnd)}`"
+                  :title="tooltipTitle(timer)"
                 >
-                  <span class="timer-tag">{{ timer.tag || 'No tag' }}</span>
+                  <span class="timer-tag" v-if="timer.tag">{{ timer.tag }}</span>
+                  <span class="timer-project" v-if="timer.projectDisplay">{{ timer.projectDisplay }}</span>
                 </div>
               </div>
             </div>
@@ -476,5 +490,16 @@ const weekLabel = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   display: block;
+}
+
+.timer-project {
+  font-size: 0.65rem;
+  opacity: 0.9;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  margin-top: 2px;
 }
 </style>

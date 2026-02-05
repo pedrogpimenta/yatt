@@ -1,15 +1,32 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { api } from './api.js'
+import { preferences } from './preferences.js'
 import Login from './components/Login.vue'
 import Timer from './components/Timer.vue'
 import Settings from './components/Settings.vue'
 
 const isLoggedIn = ref(!!api.getToken())
 const showSettings = ref(false)
+const timerRef = ref(null)
 
-function handleLogin() {
+async function loadUserPreferences() {
+  if (!api.getToken() || api.isLocalMode()) {
+    return
+  }
+  try {
+    const userPreferences = await api.getUserPreferences()
+    if (userPreferences && typeof userPreferences.dayStartHour === 'number') {
+      preferences.dayStartHour = userPreferences.dayStartHour
+    }
+  } catch (err) {
+    console.error('Failed to load user preferences:', err)
+  }
+}
+
+async function handleLogin() {
   isLoggedIn.value = true
+  await loadUserPreferences()
 }
 
 async function handleLogout() {
@@ -24,17 +41,21 @@ function openSettings() {
 
 function closeSettings() {
   showSettings.value = false
+  timerRef.value?.refetch?.()
 }
 
 onMounted(() => {
   isLoggedIn.value = !!api.getToken()
+  if (isLoggedIn.value) {
+    loadUserPreferences()
+  }
 })
 </script>
 
 <template>
   <div class="app" :class="{ 'logged-in': isLoggedIn }">
     <Login v-if="!isLoggedIn" @login="handleLogin" />
-    <Timer v-else @openSettings="openSettings" />
+    <Timer ref="timerRef" v-else @openSettings="openSettings" />
     
     <!-- Settings Modal -->
     <Settings 

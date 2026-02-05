@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { api } from '../api.js'
 import { 
   preferences, 
@@ -18,6 +18,8 @@ import {
 import TimerItem from './TimerItem.vue'
 import WeeklyCalendar from './WeeklyCalendar.vue'
 import TagInput from './TagInput.vue'
+import ProjectSelector from './ProjectSelector.vue'
+import { formatProjectLabel } from '../projects.js'
 
 const emit = defineEmits(['openSettings'])
 
@@ -25,9 +27,14 @@ const timers = ref([])
 const loading = ref(true)
 const error = ref('')
 const newTag = ref('')
+const newDescription = ref('')
 const tags = ref([])
+const projects = ref([])
+const clients = ref([])
+const newProjectId = ref(null)
 const viewMode = ref('calendar') // 'list' or 'calendar'
 const selectedTimer = ref(null)
+const selectedTimerFromCalendar = ref(false)
 const filterTag = ref('') // '' means all tags
 
 // Modal stack to track open modals (for Escape key handling)
@@ -69,7 +76,9 @@ const manualEntry = ref({
   startTime: '',
   endDate: '',
   endTime: '',
-  tag: ''
+  tag: '',
+  description: '',
+  projectId: null
 })
 const manualEndDateSynced = ref(true)
 const manualStartDatePicker = ref(null)
@@ -101,7 +110,9 @@ function openManualEntry() {
     startTime: getDefaultTime(9),
     endDate: formattedDate,
     endTime: getDefaultTime(10),
-    tag: ''
+    tag: '',
+    description: '',
+    projectId: newProjectId.value
   }
   hiddenManualStartDate.value = isoDate
   hiddenManualEndDate.value = isoDate
@@ -167,7 +178,7 @@ function onManualEndDateInput() {
 async function saveManualEntry() {
   error.value = ''
   
-  const { startDate, startTime, endDate, endTime, tag } = manualEntry.value
+  const { startDate, startTime, endDate, endTime, tag, description, projectId } = manualEntry.value
   
   if (!startDate || !startTime || !endDate || !endTime) {
     error.value = 'Please fill in all required fields'
@@ -210,7 +221,9 @@ async function saveManualEntry() {
     await api.createTimer({
       start_time: startDateTime.toISOString(),
       end_time: endDateTime.toISOString(),
-      tag: tag || null
+      tag: tag || null,
+      description: description?.trim() || null,
+      project_id: projectId || null
     })
     
     // Refresh tags if it's a new one
@@ -238,6 +251,17 @@ const runningTimer = computed(() => {
 })
 
 const isRunning = computed(() => !!runningTimer.value)
+
+function findProjectById(id) {
+  if (id === null || id === undefined) return null
+  return projects.value.find((project) => String(project.id) === String(id)) || null
+}
+
+const runningProjectLabel = computed(() => {
+  if (!runningTimer.value) return ''
+  const project = findProjectById(runningTimer.value.project_id)
+  return project ? formatProjectLabel(project) : ''
+})
 
 const currentElapsed = ref(0)
 const isEditingElapsed = ref(false)
@@ -390,6 +414,8 @@ async function syncPendingChanges() {
     if (result.synced > 0) {
       await fetchTimers()
       await fetchTags()
+      await fetchProjects()
+      await fetchClients()
     }
   } catch (err) {
     error.value = 'Sync failed: ' + err.message
@@ -538,6 +564,8 @@ async function fetchTimers() {
     // Sync tag input with running timer's tag
     if (runningTimer.value) {
       newTag.value = runningTimer.value.tag || ''
+      newDescription.value = runningTimer.value.description || ''
+      newProjectId.value = runningTimer.value.project_id || null
     }
   } catch (err) {
     error.value = err.message
@@ -554,6 +582,45 @@ async function fetchTags() {
   }
 }
 
+async function fetchProjects() {
+  try {
+    projects.value = await api.getProjects()
+  } catch (err) {
+    console.error('Failed to fetch projects:', err)
+  }
+}
+
+async function fetchClients() {
+  try {
+    clients.value = await api.getClients()
+  } catch (err) {
+    console.error('Failed to fetch clients:', err)
+  }
+}
+
+async function refetch() {
+  await fetchTimers()
+  await fetchProjects()
+  await fetchClients()
+  await fetchTags()
+}
+
+defineExpose({ refetch })
+
+async function handleCreateProject(payload) {
+  const created = await api.createProject(payload)
+  if (created) {
+    const existingIndex = projects.value.findIndex((project) => String(project.id) === String(created.id))
+    if (existingIndex === -1) {
+      projects.value = [...projects.value, created]
+    } else {
+      projects.value.splice(existingIndex, 1, created)
+    }
+    await fetchClients()
+  }
+  return created
+}
+
 async function toggleTimer() {
   error.value = ''
   try {
@@ -561,7 +628,11 @@ async function toggleTimer() {
       await api.stopTimer(runningTimer.value.id)
       newTag.value = ''
     } else {
-      await api.createTimer({ tag: newTag.value || null })
+      await api.createTimer({
+        tag: newTag.value || null,
+        description: newDescription.value?.trim() || null,
+        project_id: newProjectId.value || null
+      })
       // Refresh tags after creating a timer with a potentially new tag
       if (newTag.value && !tags.value.includes(newTag.value)) {
         fetchTags()
@@ -590,6 +661,46 @@ async function updateRunningTag() {
   }
 }
 
+async function updateRunningProject() {
+  if (!runningTimer.value) return
+  error.value = ''
+  try {
+    await api.updateTimer(runningTimer.value.id, { project_id: newProjectId.value || null })
+    await fetchTimers()
+    await updatePendingSyncCount()
+  } catch (err) {
+    error.value = err.message
+  }
+}
+
+async function updateRunningDescription() {
+  if (!runningTimer.value) return
+  error.value = ''
+  try {
+    await api.updateTimer(runningTimer.value.id, { description: newDescription.value?.trim() || null })
+    await fetchTimers()
+    await updatePendingSyncCount()
+  } catch (err) {
+    error.value = err.message
+  }
+}
+
+function onDescriptionBlur() {
+  if (isRunning.value) {
+    updateRunningDescription()
+  }
+}
+
+watch(newProjectId, async (newValue) => {
+  if (!runningTimer.value) return
+  const currentProjectId = runningTimer.value.project_id ?? null
+  const normalizedNewValue = newValue ?? null
+  if (String(currentProjectId) === String(normalizedNewValue)) {
+    return
+  }
+  await updateRunningProject()
+})
+
 async function handleUpdate(id, data) {
   error.value = ''
   try {
@@ -616,17 +727,21 @@ async function handleDelete(id) {
 
 function selectTimerFromCalendar(timer) {
   selectedTimer.value = timer
+  selectedTimerFromCalendar.value = true
   pushModal('selectedTimer')
 }
 
 function closeSelectedTimer() {
   selectedTimer.value = null
+  selectedTimerFromCalendar.value = false
   popModal('selectedTimer')
 }
 
 onMounted(() => {
   fetchTimers()
   fetchTags()
+  fetchProjects()
+  fetchClients()
   updatePendingSyncCount()
   tickInterval = setInterval(() => {
     updateCurrentElapsed()
@@ -715,6 +830,8 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="current-tag" v-if="runningTimer?.tag">{{ runningTimer.tag }}</div>
+            <div class="current-project" v-if="runningProjectLabel">{{ runningProjectLabel }}</div>
+            <div class="current-description" v-if="runningTimer?.description">{{ runningTimer.description }}</div>
             <div class="current-status" v-if="!isRunning">Stopped</div>
             <div class="started-at" v-if="isRunning && !isEditingStartTime" @click="startEditStartTime">
               Started {{ displayStartTime }}
@@ -733,6 +850,30 @@ onUnmounted(() => {
               <button @click="saveEditStartTime" class="btn-icon btn-icon-primary" title="Save">✓</button>
             </div>
           </div>
+        </div>
+
+        <!-- Project Selector -->
+        <div class="project-input-section">
+          <ProjectSelector
+            v-model="newProjectId"
+            :projects="projects"
+            :clients="clients"
+            :onCreate="handleCreateProject"
+            :placeholder="isRunning ? 'Change project...' : 'Project (optional)'"
+            @open-create-form="fetchClients"
+          />
+        </div>
+
+        <!-- Description -->
+        <div class="description-input-section">
+          <textarea
+            id="running-description"
+            v-model="newDescription"
+            placeholder="Description (optional)"
+            rows="1"
+            class="sidebar-input description-input"
+            @blur="onDescriptionBlur"
+          />
         </div>
 
         <!-- Tag Input -->
@@ -824,7 +965,8 @@ onUnmounted(() => {
       <div class="content-body" v-if="viewMode === 'calendar'">
         <WeeklyCalendar 
           :key="`calendar-${preferences.dateFormat}-${preferences.timeFormat}`"
-          :timers="timers" 
+          :timers="timers"
+          :projects="projects"
           :currentElapsed="currentElapsed"
           @select="selectTimerFromCalendar"
         />
@@ -864,8 +1006,12 @@ onUnmounted(() => {
               v-for="timer in group.timers" 
               :key="`${timer.id}-${preferences.dateFormat}-${preferences.timeFormat}`" 
               :timer="timer"
+              :projects="projects"
+              :clients="clients"
+              :onCreateProject="handleCreateProject"
               @update="handleUpdate"
               @delete="handleDelete"
+              @open-create-form="fetchClients"
             />
           </template>
         </div>
@@ -879,8 +1025,14 @@ onUnmounted(() => {
         <TimerItem 
           :key="`selected-${selectedTimer?.id}-${preferences.dateFormat}-${preferences.timeFormat}`"
           :timer="selectedTimer"
+          :projects="projects"
+          :clients="clients"
+          :onCreateProject="handleCreateProject"
+          :startInEditMode="selectedTimerFromCalendar"
           @update="handleUpdate"
           @delete="handleDelete"
+          @cancel="closeSelectedTimer"
+          @open-create-form="fetchClients"
         />
       </div>
     </div>
@@ -958,6 +1110,23 @@ onUnmounted(() => {
               v-model="manualEntry.tag"
               :tags="tags"
               placeholder="Add a tag..."
+            />
+          </div>
+
+          <div class="form-group">
+            <label>Description (optional)</label>
+            <textarea v-model="manualEntry.description" placeholder="Optional description..." rows="2" class="manual-description-input"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>Project (optional)</label>
+            <ProjectSelector
+              v-model="manualEntry.projectId"
+              :projects="projects"
+              :clients="clients"
+              :onCreate="handleCreateProject"
+              placeholder="Select a project..."
+              @open-create-form="fetchClients"
             />
           </div>
           
@@ -1182,6 +1351,20 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
+.current-project {
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.current-description {
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .current-status {
   margin-top: 0.25rem;
   font-size: 0.75rem;
@@ -1269,6 +1452,56 @@ onUnmounted(() => {
 /* Tag Input */
 .tag-input-section {
   width: 100%;
+}
+
+/* Project Selector */
+.project-input-section {
+  width: 100%;
+}
+
+.description-input-section {
+  width: 100%;
+}
+
+/* Shared sidebar input style – same as project/tag inputs */
+.sidebar-content .sidebar-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  box-sizing: border-box;
+}
+
+.sidebar-content .sidebar-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.sidebar-content .sidebar-input::placeholder {
+  color: var(--text-muted);
+}
+
+.description-input {
+  font-family: inherit;
+  resize: vertical;
+  min-height: calc(1.5em + 1.5rem);
+  line-height: 1.5;
+}
+
+.manual-description-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 52px;
 }
 
 /* Toggle Button */

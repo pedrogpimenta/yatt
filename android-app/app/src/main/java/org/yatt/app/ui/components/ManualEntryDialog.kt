@@ -31,7 +31,7 @@ import java.time.LocalTime
 @Composable
 fun ManualEntryDialog(
     preferences: UserPreferences,
-    onSave: (Instant, Instant, String?) -> Unit,
+    onSave: (Instant, Instant, String?, String?) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -41,6 +41,7 @@ fun ManualEntryDialog(
     var startTime by remember { mutableStateOf(LocalTime.of(9, 0)) }
     var endTime by remember { mutableStateOf(LocalTime.of(10, 0)) }
     var tag by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
 
     fun openStartDatePicker() {
@@ -119,6 +120,16 @@ fun ManualEntryDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2
+                )
+
                 if (!error.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(error ?: "", color = MaterialTheme.colorScheme.error)
@@ -133,7 +144,7 @@ fun ManualEntryDialog(
                     error = "End time must be after start time"
                 } else {
                     error = null
-                    onSave(start, end, tag.trim().ifBlank { null })
+                    onSave(start, end, tag.trim().ifBlank { null }, description.trim().ifBlank { null })
                 }
             }) {
                 Text("Add entry")

@@ -1,4 +1,5 @@
 import * as offlineStorage from './offlineStorage.js'
+import { preferences } from './preferences.js'
 
 const API_BASE = '/api'
 
@@ -226,13 +227,19 @@ async function attemptSync() {
       }
     }
 
-    // Refresh timers from server after sync
+    // Refresh timers and projects from server after sync
     if (syncedCount > 0) {
       try {
         const serverTimers = await request('/timers')
         await offlineStorage.saveTimers(serverTimers)
       } catch (err) {
         console.error('Failed to refresh timers after sync:', err)
+      }
+      try {
+        const serverProjects = await request('/projects')
+        await offlineStorage.saveProjects(serverProjects)
+      } catch (err) {
+        console.error('Failed to refresh projects after sync:', err)
       }
     }
 
@@ -371,6 +378,132 @@ export const api = {
 
   getMe() {
     return request('/auth/me')
+  },
+
+  getUserPreferences() {
+    if (isLocalMode()) {
+      return Promise.resolve(null)
+    }
+    return tryRequest('/auth/preferences')
+  },
+
+  updateUserPreferences(preferences) {
+    if (isLocalMode()) {
+      return Promise.resolve(null)
+    }
+    return tryRequest('/auth/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(preferences)
+    })
+  },
+
+  async getProjects() {
+    if (isLocalMode()) {
+      return await offlineStorage.getAllProjects()
+    }
+
+    const result = await tryRequest('/projects')
+
+    if (result !== null) {
+      await offlineStorage.saveProjects(result)
+      return result
+    }
+
+    return await offlineStorage.getAllProjects()
+  },
+
+  async getClients() {
+    if (isLocalMode()) {
+      const projects = await offlineStorage.getAllProjects()
+      const byName = new Map()
+      for (const p of projects) {
+        if (p.client_name && !byName.has(p.client_name)) {
+          byName.set(p.client_name, { id: p.client_id, name: p.client_name })
+        }
+      }
+      return Array.from(byName.values()).sort((a, b) =>
+        (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
+      )
+    }
+    const result = await tryRequest('/clients')
+    return result !== null ? result : []
+  },
+
+  async createProject(data = {}) {
+    const payload = {
+      name: data.name,
+      type: data.type || null,
+      clientName: data.clientName || null,
+      clientId: data.clientId || null
+    }
+
+    if (isLocalMode()) {
+      const localProject = {
+        id: offlineStorage.generateProjectId(),
+        name: payload.name,
+        type: payload.type,
+        client_id: null,
+        client_name: payload.clientName || null
+      }
+      await offlineStorage.saveProject(localProject)
+      return localProject
+    }
+
+    const result = await tryRequest('/projects', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+
+    if (result !== null) {
+      await offlineStorage.saveProject(result)
+      return result
+    }
+
+    throw new Error('Offline - unable to create project')
+  },
+
+  async updateProject(id, data = {}) {
+    const payload = {
+      name: data.name,
+      type: data.type ?? null,
+      clientName: data.clientName ?? null,
+      clientId: data.clientId ?? null
+    }
+    if (isLocalMode()) {
+      const existing = await offlineStorage.getProject(id)
+      if (!existing) throw new Error('Project not found')
+      const updated = {
+        ...existing,
+        name: payload.name ?? existing.name,
+        type: Object.prototype.hasOwnProperty.call(data, 'type') ? (payload.type || null) : existing.type
+      }
+      if (Object.prototype.hasOwnProperty.call(data, 'clientId')) {
+        updated.client_id = payload.clientId
+        updated.client_name = payload.clientId != null ? existing.client_name : null
+      } else if (Object.prototype.hasOwnProperty.call(data, 'clientName')) {
+        updated.client_name = payload.clientName || null
+      }
+      await offlineStorage.saveProject(updated)
+      return updated
+    }
+    const result = await tryRequest(`/projects/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    })
+    if (result !== null) {
+      await offlineStorage.saveProject(result)
+      return result
+    }
+    throw new Error('Offline - unable to update project')
+  },
+
+  async deleteProject(id) {
+    if (isLocalMode()) {
+      await offlineStorage.deleteProject(id)
+      return
+    }
+    await request(`/projects/${id}`, { method: 'DELETE' })
+    await offlineStorage.deleteProject(id)
   },
 
   changePassword(currentPassword, newPassword) {
@@ -559,14 +692,25 @@ export const api = {
   },
 
   // Sync methods for QR code pairing
+  getPreferencesForSync() {
+    return {
+      dateFormat: preferences.dateFormat,
+      timeFormat: preferences.timeFormat,
+      dayStartHour: preferences.dayStartHour
+    }
+  },
+
   async createSyncSession() {
-    const timers = await offlineStorage.getAllTimers()
+    const [timers, projects] = await Promise.all([
+      offlineStorage.getAllTimers(),
+      offlineStorage.getAllProjects()
+    ])
     const deviceId = getDeviceId()
-    
+    const prefs = this.getPreferencesForSync()
     const res = await fetch(`${API_BASE}/sync/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceId, timers })
+      body: JSON.stringify({ deviceId, timers, projects: projects || [], preferences: prefs })
     })
     
     if (!res.ok) {
@@ -578,13 +722,16 @@ export const api = {
   },
 
   async joinSyncSession(syncCode) {
-    const timers = await offlineStorage.getAllTimers()
+    const [timers, projects] = await Promise.all([
+      offlineStorage.getAllTimers(),
+      offlineStorage.getAllProjects()
+    ])
     const deviceId = getDeviceId()
-    
+    const prefs = this.getPreferencesForSync()
     const res = await fetch(`${API_BASE}/sync/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ syncCode, deviceId, timers })
+      body: JSON.stringify({ syncCode, deviceId, timers, projects: projects || [], preferences: prefs })
     })
     
     if (!res.ok) {
@@ -606,14 +753,12 @@ export const api = {
     return await res.json()
   },
 
-  async completeSyncImport(timers) {
+  async completeSyncImport(timers, projects = null, preferencesPayload = null) {
     // Merge timers into local storage
     const existingTimers = await offlineStorage.getAllTimers()
     const existingIds = new Set(existingTimers.map(t => t.id))
-    
-    // Add new timers, update existing ones
+
     for (const timer of timers) {
-      // Generate new local ID if it conflicts
       if (existingIds.has(timer.id)) {
         const newId = offlineStorage.generateLocalId()
         await offlineStorage.saveTimer({ ...timer, id: newId })
@@ -621,6 +766,20 @@ export const api = {
         await offlineStorage.saveTimer(timer)
       }
     }
+
+    // Merge projects if provided
+    if (Array.isArray(projects) && projects.length > 0) {
+      const existingProjects = await offlineStorage.getAllProjects()
+      const existingProjectIds = new Set(existingProjects.map((p) => String(p.id)))
+      for (const project of projects) {
+        if (!existingProjectIds.has(String(project.id))) {
+          await offlineStorage.saveProject(project)
+        }
+      }
+    }
+
+    // Preferences are applied by the caller (DeviceSync) so the reactive preferences object updates
+    return { preferencesPayload }
   },
 
   // Local mode helpers

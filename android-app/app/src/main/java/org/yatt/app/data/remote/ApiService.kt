@@ -11,6 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.yatt.app.data.SettingsStore
 import org.yatt.app.data.local.TimerEntity
+import org.yatt.app.data.model.Project
 import org.yatt.app.data.model.SyncSession
 import org.yatt.app.data.model.UserProfile
 import java.io.IOException
@@ -43,6 +44,16 @@ class ApiService(private val settingsStore: SettingsStore) {
         )
     }
 
+    suspend fun getPreferences(): Int {
+        val response = requestJson("auth/preferences", "GET")
+        return response.optInt("dayStartHour", 0)
+    }
+
+    suspend fun updatePreferences(dayStartHour: Int) {
+        val payload = JSONObject().put("dayStartHour", dayStartHour)
+        requestJson("auth/preferences", "PATCH", payload)
+    }
+
     suspend fun changePassword(currentPassword: String, newPassword: String) {
         val payload = JSONObject()
             .put("currentPassword", currentPassword)
@@ -67,23 +78,31 @@ class ApiService(private val settingsStore: SettingsStore) {
     suspend fun createTimer(
         startTime: String,
         endTime: String?,
-        tag: String?
+        tag: String?,
+        description: String? = null
     ): TimerEntity {
         val payload = JSONObject()
             .put("start_time", startTime)
             .apply {
                 if (endTime != null) put("end_time", endTime)
                 if (tag != null) put("tag", tag)
+                if (description != null) put("description", description)
             }
         val response = requestJson("timers", "POST", payload)
         return jsonToTimer(response)
     }
 
-    suspend fun updateTimer(id: String, startTime: String?, endTime: String?, tag: String?): TimerEntity {
+    suspend fun updateTimer(id: String, startTime: String?, endTime: String?, tag: String?, description: String? = null): TimerEntity {
         val payload = JSONObject()
         if (startTime != null) payload.put("start_time", startTime)
         if (endTime != null) payload.put("end_time", endTime)
         if (tag != null) payload.put("tag", tag)
+        // When doing a full update (start/end set) or explicitly clearing, send description (null clears it)
+        if (startTime != null || endTime != null) {
+            payload.put("description", description ?: JSONObject.NULL)
+        } else if (description != null) {
+            payload.put("description", description)
+        }
         val response = requestJson("timers/$id", "PATCH", payload)
         return jsonToTimer(response)
     }
@@ -95,6 +114,41 @@ class ApiService(private val settingsStore: SettingsStore) {
 
     suspend fun deleteTimer(id: String) {
         requestJson("timers/$id", "DELETE")
+    }
+
+    suspend fun getProjects(): List<Project> {
+        val response = requestArray("projects", "GET")
+        val result = ArrayList<Project>(response.length())
+        for (i in 0 until response.length()) {
+            result.add(jsonToProject(response.getJSONObject(i)))
+        }
+        return result
+    }
+
+    suspend fun createProject(name: String, type: String?, clientName: String?, clientId: Long?): Project {
+        val payload = JSONObject()
+            .put("name", name)
+            .apply {
+                if (type != null) put("type", type)
+                if (clientName != null) put("clientName", clientName)
+                if (clientId != null) put("clientId", clientId)
+            }
+        val response = requestJson("projects", "POST", payload)
+        return jsonToProject(response)
+    }
+
+    suspend fun updateProject(id: Long, name: String, type: String?, clientName: String?, clientId: Long?): Project {
+        val payload = JSONObject()
+            .put("name", name)
+            .put("type", type ?: JSONObject.NULL)
+            .put("clientName", clientName ?: JSONObject.NULL)
+            .put("clientId", clientId ?: JSONObject.NULL)
+        val response = requestJson("projects/$id", "PATCH", payload)
+        return jsonToProject(response)
+    }
+
+    suspend fun deleteProject(id: Long) {
+        requestJson("projects/$id", "DELETE")
     }
 
     suspend fun createSyncSession(deviceId: String, timers: List<TimerEntity>): SyncSession {
@@ -187,15 +241,35 @@ class ApiService(private val settingsStore: SettingsStore) {
         return responseBody
     }
 
+    private fun jsonToProject(json: JSONObject): Project {
+        val id = json.getLong("id")
+        val name = json.getString("name")
+        val type = if (json.isNull("type")) null else json.optString("type").takeIf { it.isNotEmpty() }
+        val clientId = if (json.isNull("client_id")) null else json.optLong("client_id").takeIf { it != 0L }
+        val clientName = if (json.isNull("client_name")) null else json.optString("client_name").takeIf { it.isNotEmpty() }
+        return Project(id = id, name = name, type = type, clientId = clientId, clientName = clientName)
+    }
+
     private fun jsonToTimer(json: JSONObject): TimerEntity {
         val idValue = json.get("id").toString()
         val endTime = if (json.isNull("end_time")) null else json.getString("end_time")
         val tag = if (json.isNull("tag")) null else json.getString("tag")
+        val description = if (json.isNull("description")) null else json.optString("description").takeIf { it.isNotEmpty() }
+        val projectId = when {
+            json.isNull("project_id") -> null
+            else -> json.get("project_id").toString()
+        }
+        val projectName = if (json.isNull("project_name")) null else json.optString("project_name").takeIf { it.isNotEmpty() }
+        val clientName = if (json.isNull("client_name")) null else json.optString("client_name").takeIf { it.isNotEmpty() }
         return TimerEntity(
             id = idValue,
             startTime = json.getString("start_time"),
             endTime = endTime,
-            tag = tag
+            tag = tag,
+            description = description,
+            projectId = projectId,
+            projectName = projectName,
+            clientName = clientName
         )
     }
 
@@ -215,6 +289,7 @@ class ApiService(private val settingsStore: SettingsStore) {
                 .put("start_time", timer.startTime)
                 .put("end_time", timer.endTime)
                 .put("tag", timer.tag)
+                .apply { if (timer.description != null) put("description", timer.description) }
             array.put(json)
         }
         return array
