@@ -125,7 +125,7 @@ PlasmaExtras.Representation {
             PlasmaComponents.ToolButton {
                 icon.name: "view-refresh"
                 onClicked: {
-                    root.fetchTimers()
+                    root.fetchTimers(true)   // force refresh so button always fetches even if loading was stuck
                     root.fetchProjects()
                     root.fetchClients()
                     root.fetchTags()

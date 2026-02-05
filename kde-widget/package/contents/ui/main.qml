@@ -9,7 +9,7 @@ PlasmoidItem {
     id: root
 
     property string apiUrl: {
-        var url = "https://time-server.command.pimenta.pt"
+        var url = "https://time.command.pimenta.pt"
         // Remove trailing slash to avoid double slashes in API calls
         while (url.endsWith("/")) {
             url = url.slice(0, -1)
@@ -31,6 +31,7 @@ PlasmoidItem {
     property bool wsConnected: false
     
     // Daily goal (from API)
+    property int dayStartHour: 0   // hour (0-23) when "today" starts, from API preferences
     property bool dailyGoalEnabled: false
     property real defaultDailyGoalHours: 8
     property bool includeWeekendGoals: false
@@ -334,22 +335,52 @@ PlasmoidItem {
         return tags
     }
     
-    // Check if a timer is running (no end_time)
+    // Check if a timer is running (no end_time) – handle API null/undefined and SQLite string "null"
     function isTimerRunning(timer) {
-        // Handle various representations of NULL from SQLite
+        if (!timer) return false
         var endTime = timer.end_time
-        return !endTime || endTime === "" || endTime === "null" || endTime === "undefined"
+        if (endTime === undefined || endTime === null) return true
+        if (typeof endTime === 'string' && (endTime === "" || endTime === "null" || endTime === "undefined")) return true
+        return false
     }
     
-    // Process local timers data (same logic as fetchTimers but from local data)
+    // Start of "today" using dayStartHour (same as web app: e.g. 6 = today starts at 06:00)
+    function getEffectiveTodayStart() {
+        var now = new Date()
+        var hour = (typeof dayStartHour === 'number' && !isNaN(dayStartHour)) ? Math.max(0, Math.min(23, dayStartHour)) : 0
+        var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        if (now.getHours() < hour) {
+            todayStart.setDate(todayStart.getDate() - 1)
+        }
+        todayStart.setHours(hour, 0, 0, 0)
+        return todayStart
+    }
+    
+    // Start of "this week" (Monday) using dayStartHour
+    function getEffectiveWeekStart() {
+        var now = new Date()
+        var hour = (typeof dayStartHour === 'number' && !isNaN(dayStartHour)) ? Math.max(0, Math.min(23, dayStartHour)) : 0
+        var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        if (now.getHours() < hour) todayStart.setDate(todayStart.getDate() - 1)
+        todayStart.setHours(hour, 0, 0, 0)
+        var day = todayStart.getDay()
+        var mondayOffset = day === 0 ? -6 : 1 - day
+        var monday = new Date(todayStart)
+        monday.setDate(todayStart.getDate() + mondayOffset)
+        return monday
+    }
+    
+    // Process timers: find running timer and compute today/week totals using dayStartHour + overlap (same as web app)
     function processTimersData(timers) {
-        // Find running timer
+        var nowMs = Date.now()
+        
+        // Find running timer (any timer without end_time)
         currentTimer = null
         for (var i = 0; i < timers.length; i++) {
             if (isTimerRunning(timers[i])) {
                 currentTimer = timers[i]
                 var start = new Date(currentTimer.start_time).getTime()
-                currentElapsed = Date.now() - start
+                currentElapsed = nowMs - start
                 newTag = currentTimer.tag || ""
                 newDescription = currentTimer.description || ""
                 newProjectId = (currentTimer.project_id !== undefined && currentTimer.project_id !== null) ? currentTimer.project_id : null
@@ -357,38 +388,48 @@ PlasmoidItem {
             }
         }
 
-        // Calculate totals
-        var now = new Date()
-        var today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-        var day = now.getDay()
-        var mondayOffset = day === 0 ? -6 : 1 - day
-        var monday = new Date(now)
-        monday.setDate(now.getDate() + mondayOffset)
-        monday.setHours(0, 0, 0, 0)
+        var todayStart = getEffectiveTodayStart()
+        var tomorrowStart = new Date(todayStart)
+        tomorrowStart.setDate(tomorrowStart.getDate() + 1)
+        var weekStart = getEffectiveWeekStart()
+        var todayStartMs = todayStart.getTime()
+        var tomorrowStartMs = tomorrowStart.getTime()
+        var weekStartMs = weekStart.getTime()
 
         var dayTotal = 0
         var wkTotal = 0
+        var runningTodayMs = 0  // overlap of running timer with today (so we can do baseToday = dayTotal - this)
+        var runningWeekMs = 0
 
         for (var j = 0; j < timers.length; j++) {
             var timer = timers[j]
-            var startTime = new Date(timer.start_time)
-            if (timer.end_time) {
-                var endTime = new Date(timer.end_time)
-                var duration = endTime.getTime() - startTime.getTime()
+            var timerStart = new Date(timer.start_time).getTime()
+            var timerEnd = timer.end_time ? new Date(timer.end_time).getTime() : nowMs
+            var isRunningTimer = isTimerRunning(timer)
 
-                if (startTime >= today) {
-                    dayTotal += duration
-                }
-                if (startTime >= monday) {
-                    wkTotal += duration
-                }
+            // Overlap with today's window (todayStart .. tomorrowStart)
+            var overlapStart = Math.max(timerStart, todayStartMs)
+            var overlapEnd = Math.min(timerEnd, tomorrowStartMs)
+            if (overlapEnd > overlapStart) {
+                var seg = overlapEnd - overlapStart
+                dayTotal += seg
+                if (isRunningTimer) runningTodayMs = seg
+            }
+
+            // Overlap with this week (weekStart .. now)
+            var wkOverlapStart = Math.max(timerStart, weekStartMs)
+            var wkOverlapEnd = timerEnd
+            if (wkOverlapEnd > wkOverlapStart) {
+                var wkSeg = wkOverlapEnd - wkOverlapStart
+                wkTotal += wkSeg
+                if (isRunningTimer) runningWeekMs = wkSeg
             }
         }
 
-        baseToday = dayTotal
-        baseWeek = wkTotal
-        todayTotal = dayTotal + (isRunning ? currentElapsed : 0)
-        weekTotal = wkTotal + (isRunning ? currentElapsed : 0)
+        baseToday = dayTotal - runningTodayMs
+        baseWeek = wkTotal - runningWeekMs
+        todayTotal = baseToday + (currentTimer ? currentElapsed : 0)
+        weekTotal = baseWeek + (currentTimer ? currentElapsed : 0)
         if (dailyGoalEnabled) updateGoalRemaining()
     }
     
@@ -752,12 +793,16 @@ PlasmoidItem {
 
     function fetchPreferences() {
         apiRequest("/auth/preferences", "GET", null, function(prefs) {
-            if (prefs && typeof prefs.dailyGoalEnabled === 'boolean') {
-                dailyGoalEnabled = prefs.dailyGoalEnabled
-                defaultDailyGoalHours = prefs.defaultDailyGoalHours != null ? Number(prefs.defaultDailyGoalHours) : 8
-                includeWeekendGoals = prefs.includeWeekendGoals === true
+            if (prefs) {
+                var h = prefs.dayStartHour
+                if (h !== undefined && h !== null) dayStartHour = Math.max(0, Math.min(23, parseInt(String(h), 10) || 0))
+                if (typeof prefs.dailyGoalEnabled === 'boolean') dailyGoalEnabled = prefs.dailyGoalEnabled
+                if (prefs.defaultDailyGoalHours != null) defaultDailyGoalHours = Number(prefs.defaultDailyGoalHours) || 8
+                if (prefs.includeWeekendGoals === true) includeWeekendGoals = true
             }
             if (dailyGoalEnabled) fetchDailyGoals()
+            // Re-fetch timers so today/week totals use the correct day boundary (force in case first fetch still loading)
+            fetchTimers(true)
         }, function() {})
     }
 
@@ -823,7 +868,8 @@ PlasmoidItem {
                 availableTags = getLocalTags()
             }
 
-            // Only fetch timers + online check first; stagger the rest so callbacks don't freeze Plasma
+            // Fetch preferences first so dayStartHour is set before we process timers (same "today" as web app)
+            fetchPreferences()
             checkOnlineStatus()
             fetchTimers()
             _staggerStep = 0
@@ -971,7 +1017,14 @@ PlasmoidItem {
                 if (xhr.status >= 200 && xhr.status < 300) {
                     isOnline = true
                     lastApiError = ""  // Clear error on success
-                    var data = xhr.responseText ? JSON.parse(xhr.responseText) : null
+                    var data = null
+                    try {
+                        data = xhr.responseText ? JSON.parse(xhr.responseText) : null
+                    } catch (e) {
+                        console.log("YATT: JSON parse error for", fullUrl, e)
+                        if (errorCallback) errorCallback()
+                        return
+                    }
                     if (callback) callback(data)
                     
                     // Try to sync pending operations when we're back online
@@ -998,12 +1051,17 @@ PlasmoidItem {
         }
     }
 
-    function fetchTimers() {
-        if (loading) return
+    function fetchTimers(forceRefresh) {
+        if (!forceRefresh && loading) return
         loading = true
         apiRequest("/timers", "GET", null, function(timers) {
             loading = false
-            if (!timers) return
+            if (!timers || !Array.isArray(timers)) {
+                // Malformed response – fall back to local data like offline
+                var localTimers = getTimersFromLocal()
+                processTimersData(localTimers)
+                return
+            }
 
             // Process immediately (fast); defer DB write to next tick so this callback doesn't block UI
             processTimersData(timers)
