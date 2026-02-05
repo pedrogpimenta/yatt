@@ -231,6 +231,8 @@ curl http://localhost:3000/timers \
 |--------|----------|-------------|
 | POST | /auth/register | Register new user |
 | POST | /auth/login | Login and get token |
+| POST | /devices/register | Register a device token |
+| POST | /devices/unregister | Unregister a device token |
 | GET | /timers | Get all timers |
 | POST | /timers | Create new timer |
 | GET | /timers/:id | Get single timer |
@@ -255,6 +257,35 @@ ws.onmessage = (event) => {
 }
 ```
 
+## Android Push Notifications (FCM)
+
+Register the Android device token so the API can send "started" and "stopped" events
+when timers change from other clients:
+
+```bash
+curl -X POST http://localhost:3000/devices/register \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"token": "FCM_DEVICE_TOKEN", "platform": "android"}'
+```
+
+To prevent the Android app from receiving push notifications for its own timer
+actions, include a client source header on timer requests:
+
+```
+X-Client-Platform: android
+```
+
+The push payload is a data message with:
+
+```
+type=timer
+event=started|stopped
+timerId=<id>
+startTime=<ISO 8601>
+endTime=<ISO 8601 or empty>
+```
+
 ## Environment Variables
 
 ### API
@@ -264,6 +295,9 @@ ws.onmessage = (event) => {
 | JWT_SECRET | (required) | Secret key for JWT signing |
 | PORT | 3000 | API server port |
 | DB_PATH | ./data/yatt.db | SQLite database path |
+| FCM_ENABLED | true | Set to false to disable FCM |
+| FCM_SERVICE_ACCOUNT_PATH | (optional) | Path to Firebase service account JSON |
+| FCM_SERVICE_ACCOUNT_JSON | (optional) | JSON or base64-encoded JSON string |
 
 ## Troubleshooting
 

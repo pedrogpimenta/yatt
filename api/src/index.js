@@ -4,10 +4,12 @@ const http = require('http');
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
 const authRoutes = require('./routes/auth');
+const deviceRoutes = require('./routes/devices');
 const timerRoutes = require('./routes/timers');
 const syncRoutes = require('./routes/sync');
 const projectRoutes = require('./routes/projects');
 const clientRoutes = require('./routes/clients');
+const { sendTimerEvent } = require('./notifications/fcm');
 const { JWT_SECRET } = require('./middleware/auth');
 
 const app = express();
@@ -86,9 +88,11 @@ function broadcastToUser(userId, data) {
 
 // Make broadcast function available to routes
 app.set('broadcastToUser', broadcastToUser);
+app.set('notifyTimerEvent', sendTimerEvent);
 
 // Routes
 app.use('/auth', authRoutes);
+app.use('/devices', deviceRoutes);
 app.use('/timers', timerRoutes);
 app.use('/sync', syncRoutes);
 app.use('/projects', projectRoutes);

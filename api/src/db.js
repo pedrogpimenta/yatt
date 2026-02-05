@@ -60,12 +60,25 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
 
+  CREATE TABLE IF NOT EXISTS device_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT 'android',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, token),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_clients_user_id ON clients(user_id);
   CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
   CREATE INDEX IF NOT EXISTS idx_projects_client_id ON projects(client_id);
   CREATE INDEX IF NOT EXISTS idx_timers_user_id ON timers(user_id);
   CREATE INDEX IF NOT EXISTS idx_timers_start_time ON timers(start_time);
   CREATE INDEX IF NOT EXISTS idx_daily_goals_user_id ON daily_goals(user_id);
+  CREATE INDEX IF NOT EXISTS idx_device_tokens_user_id ON device_tokens(user_id);
+  CREATE INDEX IF NOT EXISTS idx_device_tokens_token ON device_tokens(token);
 `);
 
 // Ensure new columns exist for existing databases

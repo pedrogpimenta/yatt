@@ -15,6 +15,26 @@ function broadcast(req, event, data) {
   }
 }
 
+function getRequestSource(req) {
+  const headerSource = req.get('x-client-platform') || req.get('x-client-source') || req.get('x-device-source');
+  const bodySource = req.body?.source;
+  return String(headerSource || bodySource || '').trim().toLowerCase();
+}
+
+function shouldNotifyAndroid(req) {
+  return getRequestSource(req) !== 'android';
+}
+
+function notifyAndroidTimerEvent(req, event, timer) {
+  const notifyTimerEvent = req.app.get('notifyTimerEvent');
+  if (!notifyTimerEvent || !timer || !shouldNotifyAndroid(req)) {
+    return;
+  }
+
+  notifyTimerEvent({ userId: req.userId, event, timer })
+    .catch((err) => console.error('FCM timer notification error:', err));
+}
+
 // Enrich a timer row with project_name and client_name for display
 function enrichTimer(timer) {
   if (!timer) return null;
@@ -125,6 +145,9 @@ router.post('/', (req, res) => {
     const timer = db.prepare('SELECT * FROM timers WHERE id = ?').get(result.lastInsertRowid);
 
     broadcast(req, 'created', timer);
+    if (!timer.end_time) {
+      notifyAndroidTimerEvent(req, 'started', timer);
+    }
     res.status(201).json(enrichTimer(timer));
   } catch (err) {
     console.error('Create timer error:', err);
@@ -142,6 +165,7 @@ router.patch('/:id', (req, res) => {
     }
 
     const { start_time, end_time, tag, description, project_id } = req.body;
+    const wasRunning = !timer.end_time;
 
     let projectId;
     if (Object.prototype.hasOwnProperty.call(req.body, 'project_id')) {
@@ -196,6 +220,10 @@ router.patch('/:id', (req, res) => {
     const updatedTimer = db.prepare('SELECT * FROM timers WHERE id = ?').get(req.params.id);
 
     broadcast(req, 'updated', updatedTimer);
+    const isRunning = !updatedTimer.end_time;
+    if (wasRunning !== isRunning) {
+      notifyAndroidTimerEvent(req, isRunning ? 'started' : 'stopped', updatedTimer);
+    }
     res.json(enrichTimer(updatedTimer));
   } catch (err) {
     console.error('Update timer error:', err);
@@ -222,6 +250,7 @@ router.post('/:id/stop', (req, res) => {
     const updatedTimer = db.prepare('SELECT * FROM timers WHERE id = ?').get(req.params.id);
 
     broadcast(req, 'stopped', updatedTimer);
+    notifyAndroidTimerEvent(req, 'stopped', updatedTimer);
     res.json(enrichTimer(updatedTimer));
   } catch (err) {
     console.error('Stop timer error:', err);
