@@ -9,7 +9,7 @@ PlasmoidItem {
     id: root
 
     property string apiUrl: {
-        var url = "https://time.command.pimenta.pt"
+        var url = "https://time-server.command.pimenta.pt"
         // Remove trailing slash to avoid double slashes in API calls
         while (url.endsWith("/")) {
             url = url.slice(0, -1)
@@ -50,6 +50,9 @@ PlasmoidItem {
     property bool isOnline: false
     property int pendingSyncCount: 0
     property bool isSyncing: false
+
+    // Defer LocalStorage writes off the XHR callback to avoid blocking UI
+    property var _pendingTimersToSave: null
 
     // WebSocket for real-time updates
     WebSocket {
@@ -98,10 +101,10 @@ PlasmoidItem {
         }
     }
     
-    // Reconnect timer
+    // Reconnect timer (slower to avoid hammering when WS not available)
     Timer {
         id: reconnectTimer
-        interval: 5000
+        interval: 20000
         running: !wsConnected && token !== ""
         repeat: true
         onTriggered: {
@@ -307,13 +310,15 @@ PlasmoidItem {
         pendingSyncCount = 0
     }
     
-    // Update pending sync count
+    // Update pending sync count (ensure int so UI binding updates)
     function updatePendingSyncCount() {
         var db = getDatabase()
+        var count = 0
         db.readTransaction(function(tx) {
             var rs = tx.executeSql('SELECT COUNT(*) as count FROM sync_queue')
-            pendingSyncCount = rs.rows.item(0).count
+            count = parseInt(String(rs.rows.item(0).count), 10) || 0
         })
+        pendingSyncCount = count
     }
     
     // Get unique tags from local timers
@@ -398,17 +403,30 @@ PlasmoidItem {
             updatePendingSyncCount()
         }
     }
+
+    // Defer pending count update to next tick so UI sees it after sync complete
+    Timer {
+        id: deferPendingCountUpdate
+        interval: 0
+        running: false
+        repeat: false
+        onTriggered: updatePendingSyncCount()
+    }
     
-    // Sync pending operations with server
-    function syncWithServer() {
-        if (isSyncing || !isOnline) return
-        
+    // Sync pending operations with server. Pass true to force sync when user clicks (ignore isOnline).
+    function syncWithServer(force) {
+        if (isSyncing) return
+        if (!force && !isOnline) return
+
         var queue = getSyncQueue()
-        if (queue.length === 0) return
-        
+        if (queue.length === 0) {
+            updatePendingSyncCount()
+            return
+        }
+
         console.log("YATT: Starting sync, " + queue.length + " operations pending")
         isSyncing = true
-        
+
         processNextSyncItem(queue, 0)
     }
     
@@ -417,7 +435,8 @@ PlasmoidItem {
         if (index >= queue.length) {
             console.log("YATT: Sync complete")
             isSyncing = false
-            updatePendingSyncCount()
+            // Defer count update so UI definitely sees it after all callbacks
+            deferPendingCountUpdate.running = true
             fetchTimers()
             fetchProjects()
             fetchClients()
@@ -485,8 +504,9 @@ PlasmoidItem {
     }
     
     function syncUpdateTimer(item, queue, index) {
-        // Skip if it's still a local ID (create not synced yet)
+        // Orphaned update for a timer that was never created on server - remove so count doesn't stay stuck
         if (isLocalId(item.timer_id)) {
+            removeSyncQueueItem(item.id)
             processNextSyncItem(queue, index + 1)
             return
         }
@@ -522,8 +542,9 @@ PlasmoidItem {
     }
     
     function syncStopTimer(item, queue, index) {
-        // Skip if it's still a local ID (create not synced yet)
+        // Orphaned stop for a timer that was never created on server - remove so count doesn't stay stuck
         if (isLocalId(item.timer_id)) {
+            removeSyncQueueItem(item.id)
             processNextSyncItem(queue, index + 1)
             return
         }
@@ -663,13 +684,55 @@ PlasmoidItem {
         }
     }
 
-    // Fallback polling (less frequent when WebSocket is connected)
+    // Defer heavy init so we don't block the shell on load (LocalStorage can block)
+    Timer {
+        id: deferredInit
+        interval: 0
+        running: true
+        repeat: false
+        onTriggered: doDeferredInit()
+    }
+
+    // Fallback polling; only when token set (slower when no WS to reduce main-thread load)
     Timer {
         id: refreshTimer
-        interval: wsConnected ? 60000 : 10000
-        running: true
+        interval: wsConnected ? 60000 : 30000
+        running: token !== ""
         repeat: true
         onTriggered: fetchTimers()
+    }
+
+    // Defer LocalStorage write to next tick so XHR callback returns quickly
+    Timer {
+        id: deferSaveTimersTimer
+        interval: 0
+        running: false
+        repeat: false
+        onTriggered: {
+            if (_pendingTimersToSave) {
+                saveTimersToLocal(_pendingTimersToSave)
+                _pendingTimersToSave = null
+            }
+        }
+    }
+
+    // Stagger remaining API calls after init so callbacks don't pile up and freeze Plasma
+    property int _staggerStep: 0
+    Timer {
+        id: staggerTimer
+        interval: 400
+        running: false
+        repeat: true
+        onTriggered: {
+            _staggerStep++
+            if (_staggerStep === 1) fetchTags()
+            else if (_staggerStep === 2) fetchProjects()
+            else if (_staggerStep === 3) fetchClients()
+            else if (_staggerStep === 4) {
+                fetchPreferences()
+                staggerTimer.running = false
+            }
+        }
     }
 
     compactRepresentation: CompactRepresentation {}
@@ -748,10 +811,10 @@ PlasmoidItem {
         weekRemainingMs = Math.max(0, weekGoalMs - weekTotal)
     }
 
-    Component.onCompleted: {
+    function doDeferredInit() {
         initDatabase()
         updatePendingSyncCount()
-        
+
         if (token) {
             // Load from local storage first for instant display
             var localTimers = getTimersFromLocal()
@@ -759,14 +822,12 @@ PlasmoidItem {
                 processTimersData(localTimers)
                 availableTags = getLocalTags()
             }
-            
-            // Then try to fetch from server
+
+            // Only fetch timers + online check first; stagger the rest so callbacks don't freeze Plasma
             checkOnlineStatus()
             fetchTimers()
-            fetchTags()
-            fetchProjects()
-            fetchClients()
-            fetchPreferences()
+            _staggerStep = 0
+            staggerTimer.running = true
         }
     }
 
@@ -938,16 +999,16 @@ PlasmoidItem {
     }
 
     function fetchTimers() {
+        if (loading) return
         loading = true
         apiRequest("/timers", "GET", null, function(timers) {
             loading = false
             if (!timers) return
 
-            // Save to local storage for offline access
-            saveTimersToLocal(timers)
-            
-            // Process the timer data
+            // Process immediately (fast); defer DB write to next tick so this callback doesn't block UI
             processTimersData(timers)
+            _pendingTimersToSave = timers
+            deferSaveTimersTimer.running = true
         }, function() {
             // Offline fallback - load from local storage
             loading = false

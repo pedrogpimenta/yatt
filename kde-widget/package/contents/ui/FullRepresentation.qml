@@ -129,11 +129,18 @@ PlasmaExtras.Representation {
                     root.fetchProjects()
                     root.fetchClients()
                     root.fetchTags()
-                    if (root.isOnline && root.pendingSyncCount > 0) {
-                        root.syncWithServer()
+                    if (root.pendingSyncCount > 0) {
+                        root.syncWithServer(true)
                     }
                 }
                 PlasmaComponents.ToolTip { text: root.pendingSyncCount > 0 ? "Refresh & Sync" : "Refresh" }
+            }
+
+            PlasmaComponents.ToolButton {
+                icon.name: "edit-clear"
+                visible: root.pendingSyncCount > 0
+                onClicked: root.clearSyncQueue()
+                PlasmaComponents.ToolTip { text: "Clear pending sync (discard unsynced items)" }
             }
 
             PlasmaComponents.ToolButton {
