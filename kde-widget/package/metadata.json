@@ -1,8 +1,8 @@
 {
     "KPlugin": {
         "Id": "org.kde.yatt",
-        "Name": "YATT Time Tracker",
-        "Description": "Simple time tracking widget",
+        "Name": "Time Command",
+        "Description": "Simple time tracking widget with projects, clients, and description",
         "Icon": "chronometer",
         "Authors": [
             {

@@ -32,6 +32,10 @@ PlasmoidItem {
     
     property var availableTags: []
     property string newTag: ""
+    property var availableProjects: []
+    property var availableClients: []
+    property var newProjectId: null
+    property string newDescription: ""
     property string lastApiError: ""
     
     // Offline support properties
@@ -113,7 +117,7 @@ PlasmoidItem {
         var db = getDatabase()
         db.transaction(function(tx) {
             // Timers cache
-            tx.executeSql('CREATE TABLE IF NOT EXISTS timers (id TEXT PRIMARY KEY, user_id INTEGER, start_time TEXT, end_time TEXT, tag TEXT, local_id TEXT)')
+            tx.executeSql('CREATE TABLE IF NOT EXISTS timers (id TEXT PRIMARY KEY, user_id INTEGER, start_time TEXT, end_time TEXT, tag TEXT, description TEXT, project_id INTEGER, local_id TEXT)')
             
             // Sync queue for offline operations
             tx.executeSql('CREATE TABLE IF NOT EXISTS sync_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, operation TEXT, timer_id TEXT, data TEXT, timestamp INTEGER)')
@@ -121,6 +125,14 @@ PlasmoidItem {
             // Metadata
             tx.executeSql('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)')
         })
+        // Migrate: add description and project_id if missing (existing installs)
+        var db2 = getDatabase()
+        try {
+            db2.transaction(function(tx) { tx.executeSql('ALTER TABLE timers ADD COLUMN description TEXT') })
+        } catch (e) {}
+        try {
+            db2.transaction(function(tx) { tx.executeSql('ALTER TABLE timers ADD COLUMN project_id INTEGER') })
+        } catch (e) {}
     }
     
     // Generate local ID for offline-created timers
@@ -150,8 +162,8 @@ PlasmoidItem {
             // Insert server timers
             for (var j = 0; j < timers.length; j++) {
                 var t = timers[j]
-                tx.executeSql('INSERT OR REPLACE INTO timers (id, user_id, start_time, end_time, tag) VALUES (?, ?, ?, ?, ?)',
-                    [String(t.id), t.user_id, t.start_time, t.end_time || null, t.tag || null])
+                tx.executeSql('INSERT OR REPLACE INTO timers (id, user_id, start_time, end_time, tag, description, project_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    [String(t.id), t.user_id, t.start_time, t.end_time || null, t.tag || null, t.description || null, t.project_id != null ? t.project_id : null])
             }
         })
     }
@@ -170,6 +182,8 @@ PlasmoidItem {
                     start_time: row.start_time,
                     end_time: row.end_time,
                     tag: row.tag,
+                    description: row.description,
+                    project_id: row.project_id,
                     local_id: row.local_id
                 })
             }
@@ -181,8 +195,8 @@ PlasmoidItem {
     function saveTimerToLocal(timer) {
         var db = getDatabase()
         db.transaction(function(tx) {
-            tx.executeSql('INSERT OR REPLACE INTO timers (id, user_id, start_time, end_time, tag, local_id) VALUES (?, ?, ?, ?, ?, ?)',
-                [String(timer.id), timer.user_id, timer.start_time, timer.end_time || null, timer.tag || null, timer.local_id || null])
+            tx.executeSql('INSERT OR REPLACE INTO timers (id, user_id, start_time, end_time, tag, description, project_id, local_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                [String(timer.id), timer.user_id, timer.start_time, timer.end_time || null, timer.tag || null, timer.description || null, timer.project_id != null ? timer.project_id : null, timer.local_id || null])
         })
     }
     
@@ -204,6 +218,14 @@ PlasmoidItem {
                 fields.push('tag = ?')
                 values.push(updates.tag)
             }
+            if (updates.description !== undefined) {
+                fields.push('description = ?')
+                values.push(updates.description)
+            }
+            if (updates.project_id !== undefined) {
+                fields.push('project_id = ?')
+                values.push(updates.project_id)
+            }
             if (fields.length > 0) {
                 values.push(String(id))
                 tx.executeSql('UPDATE timers SET ' + fields.join(', ') + ' WHERE id = ?', values)
@@ -224,8 +246,8 @@ PlasmoidItem {
         var db = getDatabase()
         db.transaction(function(tx) {
             tx.executeSql('DELETE FROM timers WHERE id = ?', [localId])
-            tx.executeSql('INSERT OR REPLACE INTO timers (id, user_id, start_time, end_time, tag) VALUES (?, ?, ?, ?, ?)',
-                [String(serverId), serverData.user_id, serverData.start_time, serverData.end_time || null, serverData.tag || null])
+            tx.executeSql('INSERT OR REPLACE INTO timers (id, user_id, start_time, end_time, tag, description, project_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [String(serverId), serverData.user_id, serverData.start_time, serverData.end_time || null, serverData.tag || null, serverData.description || null, serverData.project_id != null ? serverData.project_id : null])
         })
     }
     
@@ -316,6 +338,8 @@ PlasmoidItem {
                 var start = new Date(currentTimer.start_time).getTime()
                 currentElapsed = Date.now() - start
                 newTag = currentTimer.tag || ""
+                newDescription = currentTimer.description || ""
+                newProjectId = (currentTimer.project_id !== undefined && currentTimer.project_id !== null) ? currentTimer.project_id : null
                 break
             }
         }
@@ -385,7 +409,9 @@ PlasmoidItem {
             console.log("YATT: Sync complete")
             isSyncing = false
             updatePendingSyncCount()
-            fetchTimers()  // Refresh from server
+            fetchTimers()
+            fetchProjects()
+            fetchClients()
             return
         }
         
@@ -660,6 +686,8 @@ PlasmoidItem {
             checkOnlineStatus()
             fetchTimers()
             fetchTags()
+            fetchProjects()
+            fetchClients()
         }
     }
 
@@ -672,6 +700,56 @@ PlasmoidItem {
             // Offline fallback - use local tags
             availableTags = getLocalTags()
         })
+    }
+
+    function fetchProjects() {
+        apiRequest("/projects", "GET", null, function(projects) {
+            if (projects) {
+                availableProjects = projects
+            }
+        }, function() {
+            availableProjects = []
+        })
+    }
+
+    function fetchClients() {
+        apiRequest("/clients", "GET", null, function(clients) {
+            if (clients) {
+                availableClients = clients
+            }
+        }, function() {
+            availableClients = []
+        })
+    }
+
+    function formatProjectLabel(project) {
+        if (!project) return ""
+        var parts = [project.name]
+        if (project.type) parts.push(project.type)
+        if (project.client_name) parts.push(project.client_name)
+        return parts.join(" - ")
+    }
+
+    function findProjectById(id) {
+        if (id === null || id === undefined) return null
+        for (var i = 0; i < availableProjects.length; i++) {
+            if (String(availableProjects[i].id) === String(id)) return availableProjects[i]
+        }
+        return null
+    }
+
+    // Filter projects by label (for searchable selector); returns array of { id, label }
+    function getFilteredProjects(query) {
+        var q = (query || "").toLowerCase().trim()
+        var result = []
+        for (var i = 0; i < availableProjects.length; i++) {
+            var p = availableProjects[i]
+            var label = formatProjectLabel(p)
+            if (!q || label.toLowerCase().indexOf(q) !== -1) {
+                result.push({ id: p.id, label: label })
+            }
+        }
+        return result.slice(0, 15)
     }
 
     function formatDuration(ms) {
@@ -810,6 +888,8 @@ PlasmoidItem {
             var localTimers = getTimersFromLocal()
             processTimersData(localTimers)
             newTag = ""
+            newDescription = ""
+            newProjectId = null
             
             if (isOnline && !isLocalId(timerId)) {
                 apiRequest("/timers/" + timerId + "/stop", "POST", null, function() {
@@ -828,6 +908,8 @@ PlasmoidItem {
             var timerTag = (newTag && newTag.trim() !== "") ? newTag.trim() : null
             
             // Create locally and update UI immediately
+            var timerDesc = (newDescription && newDescription.trim() !== "") ? newDescription.trim() : null
+            var timerProjectId = (newProjectId !== undefined && newProjectId !== null && newProjectId !== "") ? newProjectId : null
             var localId = generateLocalId()
             var localTimer = {
                 id: localId,
@@ -835,6 +917,8 @@ PlasmoidItem {
                 start_time: startTime,
                 end_time: null,
                 tag: timerTag,
+                description: timerDesc,
+                project_id: timerProjectId,
                 local_id: localId
             }
             saveTimerToLocal(localTimer)
@@ -847,9 +931,9 @@ PlasmoidItem {
             availableTags = getLocalTags()
             
             var body = { start_time: startTime }
-            if (timerTag) {
-                body.tag = timerTag
-            }
+            if (timerTag) body.tag = timerTag
+            if (timerDesc) body.description = timerDesc
+            if (timerProjectId !== null) body.project_id = timerProjectId
             
             if (isOnline) {
                 apiRequest("/timers", "POST", body, function(serverTimer) {
@@ -893,6 +977,35 @@ PlasmoidItem {
             })
         } else {
             // Already offline or local timer
+            addToSyncQueue('update', timerId, body)
+        }
+    }
+
+    function updateRunningDescription() {
+        if (!currentTimer) return
+        var timerId = currentTimer.id
+        var body = { description: (newDescription && newDescription.trim() !== "") ? newDescription.trim() : null }
+        updateTimerInLocal(timerId, body)
+        var localTimers = getTimersFromLocal()
+        processTimersData(localTimers)
+        if (isOnline && !isLocalId(timerId)) {
+            apiRequest("/timers/" + timerId, "PATCH", body, function() { fetchTimers() }, function() { addToSyncQueue('update', timerId, body) })
+        } else {
+            addToSyncQueue('update', timerId, body)
+        }
+    }
+
+    function updateRunningProject() {
+        if (!currentTimer) return
+        var timerId = currentTimer.id
+        var projId = (newProjectId !== undefined && newProjectId !== null && newProjectId !== "") ? newProjectId : null
+        var body = { project_id: projId }
+        updateTimerInLocal(timerId, body)
+        var localTimers = getTimersFromLocal()
+        processTimersData(localTimers)
+        if (isOnline && !isLocalId(timerId)) {
+            apiRequest("/timers/" + timerId, "PATCH", body, function() { fetchTimers() }, function() { addToSyncQueue('update', timerId, body) })
+        } else {
             addToSyncQueue('update', timerId, body)
         }
     }
