@@ -583,7 +583,7 @@ private fun StatsRow(
     else (dailyGoals[todayKey] ?: preferences.defaultDailyGoalHours)
     val weekGoalHours = if (!preferences.dailyGoalEnabled) null else run {
         val weekStart = TimeUtils.effectiveWeekStart(preferences.dayStartHour)
-        val startDate = LocalDate.ofInstant(weekStart, zoneId)
+        val startDate = weekStart.atZone(zoneId).toLocalDate()
         var sum = 0.0
         for (i in 0..6) {
             val d = startDate.plusDays(i.toLong())
@@ -598,8 +598,10 @@ private fun StatsRow(
     val weekRemaining = weekGoalHours?.let { h ->
         Duration.ofSeconds((h * 3600).toLong()).minus(weekTotal).takeIf { !it.isNegative }
     }
-    val todayText = TimeUtils.formatDuration(todayTotal) + (todayRemaining?.let { " (${TimeUtils.formatDuration(it)} left)" } ?: "")
-    val weekText = TimeUtils.formatDuration(weekTotal) + (weekRemaining?.let { " (${TimeUtils.formatDuration(it)} left)" } ?: "")
+    val todayValue = TimeUtils.formatDuration(todayTotal)
+    val todayRemainingText = todayRemaining?.let { if (it.seconds == 0L) "goal reached" else "${TimeUtils.formatDuration(it)} left" }
+    val weekValue = TimeUtils.formatDuration(weekTotal)
+    val weekRemainingText = weekRemaining?.let { if (it.seconds == 0L) "goal reached" else "${TimeUtils.formatDuration(it)} left" }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -608,7 +610,8 @@ private fun StatsRow(
         StatCard(
             modifier = Modifier.weight(1f),
             label = "Today",
-            value = todayText,
+            value = todayValue,
+            valueSecondary = todayRemainingText,
             containerColor = colorScheme.secondaryContainer,
             contentColor = colorScheme.onSecondaryContainer,
             icon = Icons.Outlined.Today
@@ -616,7 +619,8 @@ private fun StatsRow(
         StatCard(
             modifier = Modifier.weight(1f),
             label = "This week",
-            value = weekText,
+            value = weekValue,
+            valueSecondary = weekRemainingText,
             containerColor = colorScheme.tertiaryContainer,
             contentColor = colorScheme.onTertiaryContainer,
             icon = Icons.Outlined.DateRange
@@ -629,6 +633,7 @@ private fun StatCard(
     modifier: Modifier = Modifier,
     label: String,
     value: String,
+    valueSecondary: String? = null,
     containerColor: Color,
     contentColor: Color,
     icon: ImageVector
@@ -656,6 +661,13 @@ private fun StatCard(
                 style = MaterialTheme.typography.headlineSmall,
                 color = contentColor
             )
+            if (valueSecondary != null) {
+                Text(
+                    text = valueSecondary,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = contentColor.copy(alpha = 0.75f)
+                )
+            }
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelMedium,

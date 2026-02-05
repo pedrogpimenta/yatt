@@ -122,9 +122,10 @@ class TimerViewModel(
     fun fetchDailyGoals(dayStartHour: Int) {
         viewModelScope.launch {
             try {
+                val zoneId = java.time.ZoneId.systemDefault()
                 val weekStart = TimeUtils.effectiveWeekStart(dayStartHour)
-                val from = LocalDate.ofInstant(weekStart, java.time.ZoneId.systemDefault()).format(dateFormatter)
-                val to = LocalDate.ofInstant(weekStart.plus(java.time.Duration.ofDays(6)), java.time.ZoneId.systemDefault()).format(dateFormatter)
+                val from = weekStart.atZone(zoneId).toLocalDate().format(dateFormatter)
+                val to = weekStart.plus(java.time.Duration.ofDays(6)).atZone(zoneId).toLocalDate().format(dateFormatter)
                 dailyGoals.value = timerRepository.getDailyGoals(from, to)
             } catch (_: Exception) {
                 dailyGoals.value = emptyMap()
