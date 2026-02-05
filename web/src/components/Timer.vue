@@ -30,6 +30,7 @@ const newTag = ref('')
 const newDescription = ref('')
 const tags = ref([])
 const projects = ref([])
+const clients = ref([])
 const newProjectId = ref(null)
 const viewMode = ref('calendar') // 'list' or 'calendar'
 const selectedTimer = ref(null)
@@ -414,6 +415,7 @@ async function syncPendingChanges() {
       await fetchTimers()
       await fetchTags()
       await fetchProjects()
+      await fetchClients()
     }
   } catch (err) {
     error.value = 'Sync failed: ' + err.message
@@ -588,9 +590,18 @@ async function fetchProjects() {
   }
 }
 
+async function fetchClients() {
+  try {
+    clients.value = await api.getClients()
+  } catch (err) {
+    console.error('Failed to fetch clients:', err)
+  }
+}
+
 async function refetch() {
   await fetchTimers()
   await fetchProjects()
+  await fetchClients()
   await fetchTags()
 }
 
@@ -605,6 +616,7 @@ async function handleCreateProject(payload) {
     } else {
       projects.value.splice(existingIndex, 1, created)
     }
+    await fetchClients()
   }
   return created
 }
@@ -673,6 +685,12 @@ async function updateRunningDescription() {
   }
 }
 
+function onDescriptionBlur() {
+  if (isRunning.value) {
+    updateRunningDescription()
+  }
+}
+
 watch(newProjectId, async (newValue) => {
   if (!runningTimer.value) return
   const currentProjectId = runningTimer.value.project_id ?? null
@@ -723,6 +741,7 @@ onMounted(() => {
   fetchTimers()
   fetchTags()
   fetchProjects()
+  fetchClients()
   updatePendingSyncCount()
   tickInterval = setInterval(() => {
     updateCurrentElapsed()
@@ -838,20 +857,22 @@ onUnmounted(() => {
           <ProjectSelector
             v-model="newProjectId"
             :projects="projects"
+            :clients="clients"
             :onCreate="handleCreateProject"
             :placeholder="isRunning ? 'Change project...' : 'Project (optional)'"
+            @open-create-form="fetchClients"
           />
         </div>
 
-        <!-- Description (running timer only) -->
-        <div v-if="isRunning" class="description-input-section">
+        <!-- Description -->
+        <div class="description-input-section">
           <textarea
             id="running-description"
             v-model="newDescription"
             placeholder="Description (optional)"
             rows="1"
             class="sidebar-input description-input"
-            @blur="updateRunningDescription"
+            @blur="onDescriptionBlur"
           />
         </div>
 
@@ -986,9 +1007,11 @@ onUnmounted(() => {
               :key="`${timer.id}-${preferences.dateFormat}-${preferences.timeFormat}`" 
               :timer="timer"
               :projects="projects"
+              :clients="clients"
               :onCreateProject="handleCreateProject"
               @update="handleUpdate"
               @delete="handleDelete"
+              @open-create-form="fetchClients"
             />
           </template>
         </div>
@@ -1003,11 +1026,13 @@ onUnmounted(() => {
           :key="`selected-${selectedTimer?.id}-${preferences.dateFormat}-${preferences.timeFormat}`"
           :timer="selectedTimer"
           :projects="projects"
+          :clients="clients"
           :onCreateProject="handleCreateProject"
           :startInEditMode="selectedTimerFromCalendar"
           @update="handleUpdate"
           @delete="handleDelete"
           @cancel="closeSelectedTimer"
+          @open-create-form="fetchClients"
         />
       </div>
     </div>
@@ -1098,8 +1123,10 @@ onUnmounted(() => {
             <ProjectSelector
               v-model="manualEntry.projectId"
               :projects="projects"
+              :clients="clients"
               :onCreate="handleCreateProject"
               placeholder="Select a project..."
+              @open-create-form="fetchClients"
             />
           </div>
           

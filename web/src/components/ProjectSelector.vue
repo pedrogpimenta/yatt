@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { formatProjectLabel } from '../projects.js'
+import ClientSelector from './ClientSelector.vue'
 
 const props = defineProps({
   modelValue: {
@@ -8,6 +9,10 @@ const props = defineProps({
     default: null
   },
   projects: {
+    type: Array,
+    default: () => []
+  },
+  clients: {
     type: Array,
     default: () => []
   },
@@ -29,7 +34,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'openCreateForm'])
 
 const inputValue = ref('')
 const dropdownOpen = ref(false)
@@ -39,7 +44,7 @@ const isCreating = ref(false)
 const createForm = ref({
   name: '',
   type: '',
-  clientName: ''
+  client: { id: null, name: '' }
 })
 
 const projectOptions = computed(() => {
@@ -105,13 +110,14 @@ function openCreateForm(e) {
   const hasMatch = projectOptions.value.some((option) => option.label === inputValue.value)
   createForm.value.name = !hasMatch ? inputValue.value.trim() : ''
   createForm.value.type = ''
-  createForm.value.clientName = ''
+  createForm.value.client = { id: null, name: '' }
+  emit('openCreateForm')
 }
 
 function closeCreateForm() {
   showCreateForm.value = false
   createError.value = ''
-  createForm.value = { name: '', type: '', clientName: '' }
+  createForm.value = { name: '', type: '', client: { id: null, name: '' } }
 }
 
 async function submitCreateForm() {
@@ -127,11 +133,17 @@ async function submitCreateForm() {
 
   isCreating.value = true
   try {
-    const created = await props.onCreate({
+    const client = createForm.value.client || { id: null, name: '' }
+    const payload = {
       name: createForm.value.name.trim(),
-      type: createForm.value.type.trim() || null,
-      clientName: createForm.value.clientName.trim() || null
-    })
+      type: createForm.value.type.trim() || null
+    }
+    if (client.id != null) {
+      payload.clientId = client.id
+    } else if (client.name && client.name.trim()) {
+      payload.clientName = client.name.trim()
+    }
+    const created = await props.onCreate(payload)
     if (created?.id !== undefined) {
       emit('update:modelValue', created.id)
       inputValue.value = formatProjectLabel(created)
@@ -209,11 +221,10 @@ async function submitCreateForm() {
           placeholder="Project type (optional)"
           class="sidebar-input"
         />
-        <input
-          v-model="createForm.clientName"
-          type="text"
-          placeholder="Client name (optional)"
-          class="sidebar-input"
+        <ClientSelector
+          v-model="createForm.client"
+          :clients="clients"
+          placeholder="Client (optional)"
         />
       </div>
       <p v-if="createError" class="project-error">{{ createError }}</p>

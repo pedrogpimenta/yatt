@@ -405,6 +405,23 @@ export const api = {
     return await offlineStorage.getAllProjects()
   },
 
+  async getClients() {
+    if (isLocalMode()) {
+      const projects = await offlineStorage.getAllProjects()
+      const byName = new Map()
+      for (const p of projects) {
+        if (p.client_name && !byName.has(p.client_name)) {
+          byName.set(p.client_name, { id: p.client_id, name: p.client_name })
+        }
+      }
+      return Array.from(byName.values()).sort((a, b) =>
+        (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
+      )
+    }
+    const result = await tryRequest('/clients')
+    return result !== null ? result : []
+  },
+
   async createProject(data = {}) {
     const payload = {
       name: data.name,
@@ -451,8 +468,13 @@ export const api = {
       const updated = {
         ...existing,
         name: payload.name ?? existing.name,
-        type: Object.prototype.hasOwnProperty.call(data, 'type') ? (payload.type || null) : existing.type,
-        client_name: Object.prototype.hasOwnProperty.call(data, 'clientName') ? (payload.clientName || null) : existing.client_name
+        type: Object.prototype.hasOwnProperty.call(data, 'type') ? (payload.type || null) : existing.type
+      }
+      if (Object.prototype.hasOwnProperty.call(data, 'clientId')) {
+        updated.client_id = payload.clientId
+        updated.client_name = payload.clientId != null ? existing.client_name : null
+      } else if (Object.prototype.hasOwnProperty.call(data, 'clientName')) {
+        updated.client_name = payload.clientName || null
       }
       await offlineStorage.saveProject(updated)
       return updated

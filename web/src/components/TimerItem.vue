@@ -20,6 +20,10 @@ const props = defineProps({
     type: Array,
     default: () => []
   },
+  clients: {
+    type: Array,
+    default: () => []
+  },
   onCreateProject: {
     type: Function,
     default: null
@@ -30,7 +34,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update', 'delete', 'cancel'])
+const emit = defineEmits(['update', 'delete', 'cancel', 'openCreateForm'])
 
 function handleKeydown(e) {
   if (e.key === 'Escape' && isEditing.value) {
@@ -309,8 +313,10 @@ function deleteTimer() {
           <ProjectSelector
             v-model="editProjectId"
             :projects="projects"
+            :clients="clients"
             :onCreate="onCreateProject"
             placeholder="Select project..."
+            @open-create-form="emit('openCreateForm')"
           />
         </div>
         

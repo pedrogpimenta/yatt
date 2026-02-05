@@ -5,6 +5,7 @@ import { preferences } from '../preferences.js'
 import { formatProjectLabel } from '../projects.js'
 import * as offlineStorage from '../offlineStorage.js'
 import DeviceSync from './DeviceSync.vue'
+import ClientSelector from './ClientSelector.vue'
 
 const emit = defineEmits(['close', 'logout'])
 
@@ -45,11 +46,12 @@ const tokenCopied = ref(false)
 
 // Projects
 const projects = ref([])
+const clients = ref([])
 const loadingProjects = ref(false)
 const projectError = ref('')
 const showProjectModal = ref(false)
 const editingProject = ref(null) // null = add, project = edit
-const projectForm = ref({ name: '', type: '', clientName: '' })
+const projectForm = ref({ name: '', type: '', client: { id: null, name: '' } })
 const savingProject = ref(false)
 const deletingProjectId = ref(null)
 
@@ -224,28 +226,33 @@ async function fetchProjects() {
   }
 }
 
-function openAddProject() {
+async function openAddProject() {
   editingProject.value = null
-  projectForm.value = { name: '', type: '', clientName: '' }
+  projectForm.value = { name: '', type: '', client: { id: null, name: '' } }
   projectError.value = ''
   showProjectModal.value = true
+  await fetchClients()
 }
 
-function openEditProject(project) {
+async function openEditProject(project) {
   editingProject.value = project
   projectForm.value = {
     name: project.name || '',
     type: project.type || '',
-    clientName: project.client_name || ''
+    client: {
+      id: project.client_id ?? null,
+      name: project.client_name || ''
+    }
   }
   projectError.value = ''
   showProjectModal.value = true
+  await fetchClients()
 }
 
 function closeProjectModal() {
   showProjectModal.value = false
   editingProject.value = null
-  projectForm.value = { name: '', type: '', clientName: '' }
+  projectForm.value = { name: '', type: '', client: { id: null, name: '' } }
   projectError.value = ''
 }
 
@@ -257,10 +264,17 @@ async function saveProject() {
   }
   savingProject.value = true
   try {
+    const client = projectForm.value.client || { id: null, name: '' }
     const payload = {
       name: projectForm.value.name.trim(),
-      type: projectForm.value.type.trim() || null,
-      clientName: projectForm.value.clientName.trim() || null
+      type: projectForm.value.type.trim() || null
+    }
+    if (client.id != null) {
+      payload.clientId = client.id
+    } else if (client.name && client.name.trim()) {
+      payload.clientName = client.name.trim()
+    } else if (editingProject.value) {
+      payload.clientId = null
     }
     if (editingProject.value) {
       await api.updateProject(editingProject.value.id, payload)
@@ -270,6 +284,7 @@ async function saveProject() {
       success.value = 'Project created'
     }
     await fetchProjects()
+    await fetchClients()
     closeProjectModal()
   } catch (err) {
     projectError.value = err.message
@@ -293,9 +308,18 @@ async function confirmDeleteProject(project) {
   }
 }
 
+async function fetchClients() {
+  try {
+    clients.value = await api.getClients()
+  } catch (err) {
+    console.error('Failed to fetch clients:', err)
+  }
+}
+
 onMounted(() => {
   fetchUser()
   fetchProjects()
+  fetchClients()
   window.addEventListener('keydown', handleKeydown, true)
 })
 
@@ -502,7 +526,11 @@ onUnmounted(() => {
         </div>
         <div class="form-group">
           <label>Client (optional)</label>
-          <input v-model="projectForm.clientName" type="text" placeholder="Client name" />
+          <ClientSelector
+            v-model="projectForm.client"
+            :clients="clients"
+            placeholder="Client name"
+          />
         </div>
         <div class="project-modal-actions">
           <button type="button" class="btn-cancel" @click="closeProjectModal">Cancel</button>
