@@ -17,6 +17,7 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 // WebSocket server
 const wss = new WebSocketServer({ server });
