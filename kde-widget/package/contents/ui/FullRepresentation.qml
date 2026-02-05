@@ -138,7 +138,7 @@ PlasmaExtras.Representation {
 
             PlasmaComponents.ToolButton {
                 icon.name: "internet-web-browser"
-                onClicked: Qt.openUrlExternally("http://localhost:5173")
+                onClicked: Qt.openUrlExternally("https://time.command.pimenta.pt/")
                 PlasmaComponents.ToolTip { text: "Open Web App" }
             }
 
@@ -485,15 +485,6 @@ PlasmaExtras.Representation {
             }
         }
 
-        // Start/Stop button
-        PlasmaComponents.Button {
-            Layout.fillWidth: true
-            Layout.preferredHeight: Kirigami.Units.gridUnit * 2.5
-            text: root.isRunning ? "Stop" : "Start"
-            icon.name: root.isRunning ? "media-playback-stop" : "media-playback-start"
-            onClicked: root.toggleTimer()
-        }
-
         // Stats
         GridLayout {
             Layout.fillWidth: true
@@ -503,7 +494,7 @@ PlasmaExtras.Representation {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: Kirigami.Units.gridUnit * 3
+                Layout.preferredHeight: Kirigami.Units.gridUnit * (root.dailyGoalEnabled && root.todayRemainingMs >= 0 ? 3.5 : 3)
                 color: Kirigami.Theme.backgroundColor
                 border.color: Kirigami.Theme.disabledTextColor
                 border.width: 1
@@ -522,18 +513,23 @@ PlasmaExtras.Representation {
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: root.dailyGoalEnabled && root.todayRemainingMs >= 0
-                              ? (root.todayRemainingMs > 0 ? root.formatDuration(root.todayRemainingMs) + " left" : "goal reached")
-                              : root.formatDuration(root.todayTotal)
+                        text: root.formatDuration(root.todayTotal)
                         font.pointSize: 12
                         color: Kirigami.Theme.textColor
+                    }
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        visible: root.dailyGoalEnabled && root.todayRemainingMs >= 0
+                        text: root.todayRemainingMs > 0 ? root.formatDuration(root.todayRemainingMs) + " left" : "goal reached"
+                        font.pointSize: 9
+                        color: root.todayRemainingMs > 0 ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.positiveTextColor
                     }
                 }
             }
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: Kirigami.Units.gridUnit * 3
+                Layout.preferredHeight: Kirigami.Units.gridUnit * (root.dailyGoalEnabled && root.weekRemainingMs >= 0 ? 3.5 : 3)
                 color: Kirigami.Theme.backgroundColor
                 border.color: Kirigami.Theme.disabledTextColor
                 border.width: 1
@@ -552,11 +548,16 @@ PlasmaExtras.Representation {
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: root.dailyGoalEnabled && root.weekRemainingMs >= 0
-                              ? (root.weekRemainingMs > 0 ? root.formatDuration(root.weekRemainingMs) + " left" : "goal reached")
-                              : root.formatDuration(root.weekTotal)
+                        text: root.formatDuration(root.weekTotal)
                         font.pointSize: 12
                         color: Kirigami.Theme.textColor
+                    }
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        visible: root.dailyGoalEnabled && root.weekRemainingMs >= 0
+                        text: root.weekRemainingMs > 0 ? root.formatDuration(root.weekRemainingMs) + " left" : "goal reached"
+                        font.pointSize: 9
+                        color: root.weekRemainingMs > 0 ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.positiveTextColor
                     }
                 }
             }

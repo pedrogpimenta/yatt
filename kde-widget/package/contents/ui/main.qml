@@ -9,7 +9,7 @@ PlasmoidItem {
     id: root
 
     property string apiUrl: {
-        var url = Plasmoid.configuration.apiUrl || "http://localhost:3000"
+        var url = "https://time.command.pimenta.pt"
         // Remove trailing slash to avoid double slashes in API calls
         while (url.endsWith("/")) {
             url = url.slice(0, -1)
