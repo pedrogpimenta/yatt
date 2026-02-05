@@ -8,6 +8,7 @@ import Settings from './components/Settings.vue'
 
 const isLoggedIn = ref(!!api.getToken())
 const showSettings = ref(false)
+const timerRef = ref(null)
 
 async function loadUserPreferences() {
   if (!api.getToken() || api.isLocalMode()) {
@@ -40,6 +41,7 @@ function openSettings() {
 
 function closeSettings() {
   showSettings.value = false
+  timerRef.value?.refetch?.()
 }
 
 onMounted(() => {
@@ -53,7 +55,7 @@ onMounted(() => {
 <template>
   <div class="app" :class="{ 'logged-in': isLoggedIn }">
     <Login v-if="!isLoggedIn" @login="handleLogin" />
-    <Timer v-else @openSettings="openSettings" />
+    <Timer ref="timerRef" v-else @openSettings="openSettings" />
     
     <!-- Settings Modal -->
     <Settings 

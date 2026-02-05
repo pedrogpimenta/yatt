@@ -50,14 +50,16 @@ class TimerRepository(
     suspend fun createTimer(
         tag: String?,
         startTime: String = Instant.now().toString(),
-        endTime: String? = null
+        endTime: String? = null,
+        description: String? = null
     ): TimerEntity = withContext(Dispatchers.IO) {
         if (isLocalMode()) {
             val local = TimerEntity(
                 id = generateLocalId(),
                 startTime = startTime,
                 endTime = endTime,
-                tag = tag
+                tag = tag,
+                description = description
             )
             timerDao.saveTimer(local)
             notifyRunning(local)
@@ -66,7 +68,7 @@ class TimerRepository(
 
         if (isOnline()) {
             return@withContext try {
-                val created = apiService.createTimer(startTime, endTime, tag)
+                val created = apiService.createTimer(startTime, endTime, tag, description)
                 timerDao.saveTimer(created)
                 notifyRunning(created)
                 created
@@ -75,14 +77,15 @@ class TimerRepository(
                     id = generateLocalId(),
                     startTime = startTime,
                     endTime = endTime,
-                    tag = tag
+                    tag = tag,
+                    description = description
                 )
                 timerDao.saveTimer(local)
                 enqueueSync(
                     type = SyncType.CREATE,
                     timerId = null,
                     localId = local.id,
-                    data = jsonData(startTime, endTime, tag)
+                    data = jsonData(startTime, endTime, tag, description)
                 )
                 notifyRunning(local)
                 local
@@ -93,27 +96,29 @@ class TimerRepository(
             id = generateLocalId(),
             startTime = startTime,
             endTime = endTime,
-            tag = tag
+            tag = tag,
+            description = description
         )
         timerDao.saveTimer(local)
         enqueueSync(
             type = SyncType.CREATE,
             timerId = null,
             localId = local.id,
-            data = jsonData(startTime, endTime, tag)
+            data = jsonData(startTime, endTime, tag, description)
         )
         notifyRunning(local)
         return@withContext local
     }
 
-    suspend fun updateTimer(id: String, startTime: String?, endTime: String?, tag: String?): TimerEntity? =
+    suspend fun updateTimer(id: String, startTime: String?, endTime: String?, tag: String?, description: String? = null): TimerEntity? =
         withContext(Dispatchers.IO) {
             val existing = timerDao.getTimer(id)
             if (existing != null) {
                 val updated = existing.copy(
                     startTime = startTime ?: existing.startTime,
                     endTime = endTime ?: existing.endTime,
-                    tag = tag ?: existing.tag
+                    tag = tag ?: existing.tag,
+                    description = if (description != null) description else existing.description
                 )
                 timerDao.saveTimer(updated)
                 if (updated.endTime == null) {
@@ -132,7 +137,7 @@ class TimerRepository(
 
             if (isOnline() && !isLocalId(id)) {
                 return@withContext try {
-                    val updated = apiService.updateTimer(id, startTime, endTime, tag)
+                    val updated = apiService.updateTimer(id, startTime, endTime, tag, description)
                     timerDao.saveTimer(updated)
                     if (updated.endTime == null) {
                         val timers = timerDao.getTimers()
@@ -148,7 +153,7 @@ class TimerRepository(
                         type = SyncType.UPDATE,
                         timerId = id,
                         localId = null,
-                        data = jsonData(startTime, endTime, tag)
+                        data = jsonData(startTime, endTime, tag, description)
                     )
                     timerDao.getTimer(id)
                 }
@@ -158,7 +163,7 @@ class TimerRepository(
                 type = SyncType.UPDATE,
                 timerId = id,
                 localId = null,
-                data = jsonData(startTime, endTime, tag)
+                data = jsonData(startTime, endTime, tag, description)
             )
             return@withContext timerDao.getTimer(id)
         }
@@ -350,11 +355,12 @@ class TimerRepository(
         syncQueueDao.add(operation)
     }
 
-    private fun jsonData(startTime: String?, endTime: String?, tag: String?): String {
+    private fun jsonData(startTime: String?, endTime: String?, tag: String?, description: String? = null): String {
         val json = JSONObject()
         if (startTime != null) json.put("start_time", startTime)
         if (endTime != null) json.put("end_time", endTime)
         if (tag != null) json.put("tag", tag)
+        if (description != null) json.put("description", description)
         return json.toString()
     }
 

@@ -438,6 +438,45 @@ export const api = {
     throw new Error('Offline - unable to create project')
   },
 
+  async updateProject(id, data = {}) {
+    const payload = {
+      name: data.name,
+      type: data.type ?? null,
+      clientName: data.clientName ?? null,
+      clientId: data.clientId ?? null
+    }
+    if (isLocalMode()) {
+      const existing = await offlineStorage.getProject(id)
+      if (!existing) throw new Error('Project not found')
+      const updated = {
+        ...existing,
+        name: payload.name ?? existing.name,
+        type: Object.prototype.hasOwnProperty.call(data, 'type') ? (payload.type || null) : existing.type,
+        client_name: Object.prototype.hasOwnProperty.call(data, 'clientName') ? (payload.clientName || null) : existing.client_name
+      }
+      await offlineStorage.saveProject(updated)
+      return updated
+    }
+    const result = await tryRequest(`/projects/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    })
+    if (result !== null) {
+      await offlineStorage.saveProject(result)
+      return result
+    }
+    throw new Error('Offline - unable to update project')
+  },
+
+  async deleteProject(id) {
+    if (isLocalMode()) {
+      await offlineStorage.deleteProject(id)
+      return
+    }
+    await request(`/projects/${id}`, { method: 'DELETE' })
+    await offlineStorage.deleteProject(id)
+  },
+
   changePassword(currentPassword, newPassword) {
     return request('/auth/change-password', {
       method: 'POST',

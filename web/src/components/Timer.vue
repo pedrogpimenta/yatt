@@ -27,11 +27,13 @@ const timers = ref([])
 const loading = ref(true)
 const error = ref('')
 const newTag = ref('')
+const newDescription = ref('')
 const tags = ref([])
 const projects = ref([])
 const newProjectId = ref(null)
 const viewMode = ref('calendar') // 'list' or 'calendar'
 const selectedTimer = ref(null)
+const selectedTimerFromCalendar = ref(false)
 const filterTag = ref('') // '' means all tags
 
 // Modal stack to track open modals (for Escape key handling)
@@ -74,6 +76,7 @@ const manualEntry = ref({
   endDate: '',
   endTime: '',
   tag: '',
+  description: '',
   projectId: null
 })
 const manualEndDateSynced = ref(true)
@@ -107,6 +110,7 @@ function openManualEntry() {
     endDate: formattedDate,
     endTime: getDefaultTime(10),
     tag: '',
+    description: '',
     projectId: newProjectId.value
   }
   hiddenManualStartDate.value = isoDate
@@ -173,7 +177,7 @@ function onManualEndDateInput() {
 async function saveManualEntry() {
   error.value = ''
   
-  const { startDate, startTime, endDate, endTime, tag, projectId } = manualEntry.value
+  const { startDate, startTime, endDate, endTime, tag, description, projectId } = manualEntry.value
   
   if (!startDate || !startTime || !endDate || !endTime) {
     error.value = 'Please fill in all required fields'
@@ -217,6 +221,7 @@ async function saveManualEntry() {
       start_time: startDateTime.toISOString(),
       end_time: endDateTime.toISOString(),
       tag: tag || null,
+      description: description?.trim() || null,
       project_id: projectId || null
     })
     
@@ -557,6 +562,7 @@ async function fetchTimers() {
     // Sync tag input with running timer's tag
     if (runningTimer.value) {
       newTag.value = runningTimer.value.tag || ''
+      newDescription.value = runningTimer.value.description || ''
       newProjectId.value = runningTimer.value.project_id || null
     }
   } catch (err) {
@@ -582,6 +588,14 @@ async function fetchProjects() {
   }
 }
 
+async function refetch() {
+  await fetchTimers()
+  await fetchProjects()
+  await fetchTags()
+}
+
+defineExpose({ refetch })
+
 async function handleCreateProject(payload) {
   const created = await api.createProject(payload)
   if (created) {
@@ -604,6 +618,7 @@ async function toggleTimer() {
     } else {
       await api.createTimer({
         tag: newTag.value || null,
+        description: newDescription.value?.trim() || null,
         project_id: newProjectId.value || null
       })
       // Refresh tags after creating a timer with a potentially new tag
@@ -639,6 +654,18 @@ async function updateRunningProject() {
   error.value = ''
   try {
     await api.updateTimer(runningTimer.value.id, { project_id: newProjectId.value || null })
+    await fetchTimers()
+    await updatePendingSyncCount()
+  } catch (err) {
+    error.value = err.message
+  }
+}
+
+async function updateRunningDescription() {
+  if (!runningTimer.value) return
+  error.value = ''
+  try {
+    await api.updateTimer(runningTimer.value.id, { description: newDescription.value?.trim() || null })
     await fetchTimers()
     await updatePendingSyncCount()
   } catch (err) {
@@ -682,11 +709,13 @@ async function handleDelete(id) {
 
 function selectTimerFromCalendar(timer) {
   selectedTimer.value = timer
+  selectedTimerFromCalendar.value = true
   pushModal('selectedTimer')
 }
 
 function closeSelectedTimer() {
   selectedTimer.value = null
+  selectedTimerFromCalendar.value = false
   popModal('selectedTimer')
 }
 
@@ -783,6 +812,7 @@ onUnmounted(() => {
             </div>
             <div class="current-tag" v-if="runningTimer?.tag">{{ runningTimer.tag }}</div>
             <div class="current-project" v-if="runningProjectLabel">{{ runningProjectLabel }}</div>
+            <div class="current-description" v-if="runningTimer?.description">{{ runningTimer.description }}</div>
             <div class="current-status" v-if="!isRunning">Stopped</div>
             <div class="started-at" v-if="isRunning && !isEditingStartTime" @click="startEditStartTime">
               Started {{ displayStartTime }}
@@ -810,6 +840,18 @@ onUnmounted(() => {
             :projects="projects"
             :onCreate="handleCreateProject"
             :placeholder="isRunning ? 'Change project...' : 'Project (optional)'"
+          />
+        </div>
+
+        <!-- Description (running timer only) -->
+        <div v-if="isRunning" class="description-input-section">
+          <textarea
+            id="running-description"
+            v-model="newDescription"
+            placeholder="Description (optional)"
+            rows="1"
+            class="sidebar-input description-input"
+            @blur="updateRunningDescription"
           />
         </div>
 
@@ -902,7 +944,8 @@ onUnmounted(() => {
       <div class="content-body" v-if="viewMode === 'calendar'">
         <WeeklyCalendar 
           :key="`calendar-${preferences.dateFormat}-${preferences.timeFormat}`"
-          :timers="timers" 
+          :timers="timers"
+          :projects="projects"
           :currentElapsed="currentElapsed"
           @select="selectTimerFromCalendar"
         />
@@ -961,8 +1004,10 @@ onUnmounted(() => {
           :timer="selectedTimer"
           :projects="projects"
           :onCreateProject="handleCreateProject"
+          :startInEditMode="selectedTimerFromCalendar"
           @update="handleUpdate"
           @delete="handleDelete"
+          @cancel="closeSelectedTimer"
         />
       </div>
     </div>
@@ -1041,6 +1086,11 @@ onUnmounted(() => {
               :tags="tags"
               placeholder="Add a tag..."
             />
+          </div>
+
+          <div class="form-group">
+            <label>Description (optional)</label>
+            <textarea v-model="manualEntry.description" placeholder="Optional description..." rows="2" class="manual-description-input"></textarea>
           </div>
 
           <div class="form-group">
@@ -1280,6 +1330,14 @@ onUnmounted(() => {
   font-size: 0.8125rem;
 }
 
+.current-description {
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .current-status {
   margin-top: 0.25rem;
   font-size: 0.75rem;
@@ -1372,6 +1430,51 @@ onUnmounted(() => {
 /* Project Selector */
 .project-input-section {
   width: 100%;
+}
+
+.description-input-section {
+  width: 100%;
+}
+
+/* Shared sidebar input style – same as project/tag inputs */
+.sidebar-content .sidebar-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  box-sizing: border-box;
+}
+
+.sidebar-content .sidebar-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.sidebar-content .sidebar-input::placeholder {
+  color: var(--text-muted);
+}
+
+.description-input {
+  font-family: inherit;
+  resize: vertical;
+  min-height: calc(1.5em + 1.5rem);
+  line-height: 1.5;
+}
+
+.manual-description-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 52px;
 }
 
 /* Toggle Button */

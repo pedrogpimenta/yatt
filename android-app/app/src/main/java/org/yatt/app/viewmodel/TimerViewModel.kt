@@ -171,11 +171,11 @@ class TimerViewModel(
         }
     }
 
-    fun updateTimer(id: String, startTime: String, endTime: String?, tag: String?) {
+    fun updateTimer(id: String, startTime: String, endTime: String?, tag: String?, description: String? = null) {
         viewModelScope.launch {
             error.value = null
             try {
-                timerRepository.updateTimer(id, startTime, endTime, tag)
+                timerRepository.updateTimer(id, startTime, endTime, tag, description)
                 refreshTags()
             } catch (ex: Exception) {
                 error.value = ex.message
@@ -195,14 +195,15 @@ class TimerViewModel(
         }
     }
 
-    fun createManualEntry(startTime: Instant, endTime: Instant, tag: String?) {
+    fun createManualEntry(startTime: Instant, endTime: Instant, tag: String?, description: String? = null) {
         viewModelScope.launch {
             error.value = null
             try {
                 timerRepository.createTimer(
                     tag = tag?.trim()?.takeIf { it.isNotBlank() },
                     startTime = startTime.toString(),
-                    endTime = endTime.toString()
+                    endTime = endTime.toString(),
+                    description = description?.trim()?.takeIf { it.isNotBlank() }
                 )
                 refreshTags()
             } catch (ex: Exception) {

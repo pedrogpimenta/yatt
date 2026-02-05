@@ -149,8 +149,8 @@ fun HomeScreen(
     if (showManualEntry) {
         ManualEntryDialog(
             preferences = preferences,
-            onSave = { start, end, tag ->
-                timerViewModel.createManualEntry(start, end, tag)
+            onSave = { start, end, tag, description ->
+                timerViewModel.createManualEntry(start, end, tag, description)
                 showManualEntry = false
             },
             onDismiss = { showManualEntry = false }
@@ -161,8 +161,8 @@ fun HomeScreen(
         TimerEditDialog(
             timer = timer,
             preferences = preferences,
-            onSave = { start, end, tag ->
-                timerViewModel.updateTimer(timer.id, start.toString(), end?.toString(), tag)
+            onSave = { start, end, tag, description ->
+                timerViewModel.updateTimer(timer.id, start.toString(), end?.toString(), tag, description)
                 selectedTimer = null
             },
             onDelete = {
@@ -367,6 +367,7 @@ private fun RunningTimerCard(
 ) {
     val elapsedText = TimeUtils.formatDuration(elapsed)
     val tagLabel = runningTimer?.tag?.ifBlank { null }
+    val descriptionLabel = runningTimer?.description?.takeIf { it.isNotBlank() }
     val startTime = runningTimer?.let { TimeUtils.formatTime(TimeUtils.parseInstant(it.startTime), preferences.timeFormat) }
 
     Column(
@@ -379,6 +380,9 @@ private fun RunningTimerCard(
         Text(elapsedText, style = MaterialTheme.typography.headlineMedium)
         if (!tagLabel.isNullOrBlank()) {
             Text(tagLabel, style = MaterialTheme.typography.bodyMedium)
+        }
+        if (descriptionLabel != null) {
+            Text(descriptionLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (runningTimer == null) {
             Text("Stopped", style = MaterialTheme.typography.bodySmall)

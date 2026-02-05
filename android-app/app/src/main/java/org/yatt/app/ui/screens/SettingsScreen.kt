@@ -50,7 +50,8 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     settingsViewModel: SettingsViewModel,
     onClose: () -> Unit,
-    onOpenDeviceSync: () -> Unit
+    onOpenDeviceSync: () -> Unit,
+    onOpenProjects: () -> Unit = {}
 ) {
     val preferences by settingsViewModel.preferencesFlow.collectAsState(
         initial = UserPreferences("dd/MM/yyyy", "24h", 0, "https://time-server.command.pimenta.pt/")
@@ -153,6 +154,21 @@ fun SettingsScreen(
             )
             Button(onClick = { settingsViewModel.setApiBaseUrl(apiUrl) }) {
                 Text("Save API URL")
+            }
+
+            Divider()
+
+            if (!localMode) {
+                Text("Projects", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Manage projects and clients for your timers.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = onOpenProjects) {
+                    Text("Manage projects")
+                }
             }
 
             Divider()

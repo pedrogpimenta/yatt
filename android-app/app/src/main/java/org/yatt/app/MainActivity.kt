@@ -23,11 +23,13 @@ import androidx.navigation.compose.rememberNavController
 import org.yatt.app.ui.screens.DeviceSyncScreen
 import org.yatt.app.ui.screens.HomeScreen
 import org.yatt.app.ui.screens.LoginScreen
+import org.yatt.app.ui.screens.ProjectsScreen
 import org.yatt.app.ui.screens.SettingsScreen
 import org.yatt.app.ui.theme.YattTheme
 import org.yatt.app.viewmodel.AppViewModelFactory
 import org.yatt.app.viewmodel.AuthViewModel
 import org.yatt.app.viewmodel.DeviceSyncViewModel
+import org.yatt.app.viewmodel.ProjectsViewModel
 import org.yatt.app.viewmodel.SettingsViewModel
 import org.yatt.app.viewmodel.TimerViewModel
 import android.Manifest
@@ -61,6 +63,7 @@ class MainActivity : ComponentActivity() {
         val timerViewModel: TimerViewModel = viewModel(factory = factory)
         val settingsViewModel: SettingsViewModel = viewModel(factory = factory)
         val deviceSyncViewModel: DeviceSyncViewModel = viewModel(factory = factory)
+        val projectsViewModel: ProjectsViewModel = viewModel(factory = factory)
 
         val authState by authViewModel.uiState.collectAsState()
 
@@ -98,7 +101,14 @@ class MainActivity : ComponentActivity() {
                 SettingsScreen(
                     settingsViewModel = settingsViewModel,
                     onClose = { navController.popBackStack() },
-                    onOpenDeviceSync = { navController.navigate("device_sync") }
+                    onOpenDeviceSync = { navController.navigate("device_sync") },
+                    onOpenProjects = { navController.navigate("projects") }
+                )
+            }
+            composable("projects") {
+                ProjectsScreen(
+                    projectsViewModel = projectsViewModel,
+                    onClose = { navController.popBackStack() }
                 )
             }
             composable("device_sync") {

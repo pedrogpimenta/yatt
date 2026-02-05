@@ -67,6 +67,10 @@ const hasProjectId = timerColumns.some((column) => column.name === 'project_id')
 if (!hasProjectId) {
   db.exec('ALTER TABLE timers ADD COLUMN project_id INTEGER;');
 }
+const hasDescription = timerColumns.some((column) => column.name === 'description');
+if (!hasDescription) {
+  db.exec('ALTER TABLE timers ADD COLUMN description TEXT;');
+}
 
 db.exec('CREATE INDEX IF NOT EXISTS idx_timers_project_id ON timers(project_id);');
 

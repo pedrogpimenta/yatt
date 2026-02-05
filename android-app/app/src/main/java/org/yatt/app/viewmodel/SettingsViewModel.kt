@@ -40,6 +40,11 @@ class SettingsViewModel(
             try {
                 val profile = authRepository.getMe()
                 uiState.value = uiState.value.copy(userProfile = profile, loading = false)
+                // Sync day start from server (e.g. changed on another device)
+                try {
+                    val dayStartHour = authRepository.getPreferences()
+                    settingsStore.setDayStartHour(dayStartHour)
+                } catch (_: Exception) { /* keep local value */ }
             } catch (ex: Exception) {
                 uiState.value = uiState.value.copy(loading = false, error = ex.message)
             }
@@ -87,6 +92,11 @@ class SettingsViewModel(
     fun setDayStartHour(value: Int) {
         viewModelScope.launch {
             settingsStore.setDayStartHour(value)
+            try {
+                authRepository.updatePreferences(value)
+            } catch (_: Exception) {
+                // Local-only or offline: value is already saved locally
+            }
         }
     }
 

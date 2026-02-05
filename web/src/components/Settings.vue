@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { api } from '../api.js'
 import { preferences } from '../preferences.js'
+import { formatProjectLabel } from '../projects.js'
 import * as offlineStorage from '../offlineStorage.js'
 import DeviceSync from './DeviceSync.vue'
 
@@ -12,6 +13,8 @@ function handleKeydown(e) {
     e.stopPropagation()
     if (showLogoutConfirm.value) {
       showLogoutConfirm.value = false
+    } else if (showProjectModal.value) {
+      closeProjectModal()
     } else if (showSyncModal.value) {
       showSyncModal.value = false
     } else {
@@ -39,6 +42,16 @@ const changingPassword = ref(false)
 // Token visibility
 const showToken = ref(false)
 const tokenCopied = ref(false)
+
+// Projects
+const projects = ref([])
+const loadingProjects = ref(false)
+const projectError = ref('')
+const showProjectModal = ref(false)
+const editingProject = ref(null) // null = add, project = edit
+const projectForm = ref({ name: '', type: '', clientName: '' })
+const savingProject = ref(false)
+const deletingProjectId = ref(null)
 
 const token = api.getToken()
 
@@ -199,8 +212,90 @@ function cancelLogout() {
   showLogoutConfirm.value = false
 }
 
+async function fetchProjects() {
+  loadingProjects.value = true
+  projectError.value = ''
+  try {
+    projects.value = await api.getProjects()
+  } catch (err) {
+    projectError.value = err.message
+  } finally {
+    loadingProjects.value = false
+  }
+}
+
+function openAddProject() {
+  editingProject.value = null
+  projectForm.value = { name: '', type: '', clientName: '' }
+  projectError.value = ''
+  showProjectModal.value = true
+}
+
+function openEditProject(project) {
+  editingProject.value = project
+  projectForm.value = {
+    name: project.name || '',
+    type: project.type || '',
+    clientName: project.client_name || ''
+  }
+  projectError.value = ''
+  showProjectModal.value = true
+}
+
+function closeProjectModal() {
+  showProjectModal.value = false
+  editingProject.value = null
+  projectForm.value = { name: '', type: '', clientName: '' }
+  projectError.value = ''
+}
+
+async function saveProject() {
+  projectError.value = ''
+  if (!projectForm.value.name.trim()) {
+    projectError.value = 'Project name is required'
+    return
+  }
+  savingProject.value = true
+  try {
+    const payload = {
+      name: projectForm.value.name.trim(),
+      type: projectForm.value.type.trim() || null,
+      clientName: projectForm.value.clientName.trim() || null
+    }
+    if (editingProject.value) {
+      await api.updateProject(editingProject.value.id, payload)
+      success.value = 'Project updated'
+    } else {
+      await api.createProject(payload)
+      success.value = 'Project created'
+    }
+    await fetchProjects()
+    closeProjectModal()
+  } catch (err) {
+    projectError.value = err.message
+  } finally {
+    savingProject.value = false
+  }
+}
+
+async function confirmDeleteProject(project) {
+  if (!window.confirm(`Delete project "${formatProjectLabel(project)}"? Timers using it will have their project cleared.`)) return
+  deletingProjectId.value = project.id
+  projectError.value = ''
+  try {
+    await api.deleteProject(project.id)
+    success.value = 'Project deleted'
+    await fetchProjects()
+  } catch (err) {
+    projectError.value = err.message
+  } finally {
+    deletingProjectId.value = null
+  }
+}
+
 onMounted(() => {
   fetchUser()
+  fetchProjects()
   window.addEventListener('keydown', handleKeydown, true)
 })
 
@@ -267,6 +362,35 @@ onUnmounted(() => {
           </p>
           <button @click="downloadCSV" class="export-btn">
             Download CSV
+          </button>
+        </section>
+
+        <!-- Projects -->
+        <section class="settings-section">
+          <h3>Projects</h3>
+          <p class="section-description">
+            Manage projects and clients for your timers.
+          </p>
+          <p v-if="projectError" class="error">{{ projectError }}</p>
+          <div v-if="loadingProjects" class="loading">Loading projects...</div>
+          <div v-else class="projects-list">
+            <div
+              v-for="project in projects"
+              :key="project.id"
+              class="project-row"
+            >
+              <span class="project-label">{{ formatProjectLabel(project) }}</span>
+              <span class="project-actions">
+                <button type="button" class="project-btn small" @click="openEditProject(project)">Edit</button>
+                <button type="button" class="project-btn small danger" @click="confirmDeleteProject(project)" :disabled="deletingProjectId === project.id">
+                  {{ deletingProjectId === project.id ? '…' : 'Delete' }}
+                </button>
+              </span>
+            </div>
+            <p v-if="projects.length === 0" class="empty-hint">No projects yet.</p>
+          </div>
+          <button @click="openAddProject" class="add-project-btn">
+            Add project
           </button>
         </section>
 
@@ -361,6 +485,34 @@ onUnmounted(() => {
     @close="showSyncModal = false"
     @synced="handleSynced"
   />
+
+  <!-- Project Add/Edit Modal -->
+  <div v-if="showProjectModal" class="confirm-overlay" @click.self="closeProjectModal">
+    <div class="project-modal">
+      <h3>{{ editingProject ? 'Edit project' : 'Add project' }}</h3>
+      <p v-if="projectError" class="error">{{ projectError }}</p>
+      <form @submit.prevent="saveProject" class="project-form">
+        <div class="form-group">
+          <label>Name</label>
+          <input v-model="projectForm.name" type="text" placeholder="Project name" required />
+        </div>
+        <div class="form-group">
+          <label>Type (optional)</label>
+          <input v-model="projectForm.type" type="text" placeholder="e.g. Web, Mobile" />
+        </div>
+        <div class="form-group">
+          <label>Client (optional)</label>
+          <input v-model="projectForm.clientName" type="text" placeholder="Client name" />
+        </div>
+        <div class="project-modal-actions">
+          <button type="button" class="btn-cancel" @click="closeProjectModal">Cancel</button>
+          <button type="submit" class="submit-btn" :disabled="savingProject">
+            {{ savingProject ? 'Saving…' : (editingProject ? 'Update' : 'Add') }}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- Logout Confirmation Modal -->
   <div v-if="showLogoutConfirm" class="confirm-overlay" @click.self="cancelLogout">
@@ -691,6 +843,126 @@ onUnmounted(() => {
 .export-btn:hover {
   background: var(--bg-tertiary);
   border-color: var(--border-light);
+}
+
+.projects-list {
+  margin-bottom: 0.75rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.project-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border-color);
+  gap: 0.5rem;
+}
+
+.project-row:last-child {
+  border-bottom: none;
+}
+
+.project-label {
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.project-btn.small {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.project-btn.small:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.project-btn.small.danger:hover:not(:disabled) {
+  border-color: var(--error-color, #c53030);
+  color: var(--error-color, #c53030);
+}
+
+.add-project-btn {
+  width: 100%;
+  padding: 0.5rem;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.add-project-btn:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.empty-hint {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0.5rem 0;
+}
+
+.project-modal {
+  background: var(--bg-primary);
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 90%;
+  max-width: 360px;
+}
+
+.project-modal h3 {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.project-form .form-group {
+  margin-bottom: 1rem;
+}
+
+.project-form .form-group label {
+  display: block;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+}
+
+.project-form .form-group input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.project-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
 }
 
 /* Confirmation Modal */

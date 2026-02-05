@@ -36,7 +36,7 @@ import java.time.ZoneId
 fun TimerEditDialog(
     timer: TimerEntity,
     preferences: UserPreferences,
-    onSave: (Instant, Instant?, String?) -> Unit,
+    onSave: (Instant, Instant?, String?, String?) -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -53,6 +53,7 @@ fun TimerEditDialog(
     var endTime by remember { mutableStateOf(endDateTime?.toLocalTime() ?: startTime) }
 
     var tag by remember { mutableStateOf(timer.tag.orEmpty()) }
+    var description by remember { mutableStateOf(timer.description.orEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
@@ -125,6 +126,16 @@ fun TimerEditDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 Text("Start", style = MaterialTheme.typography.labelLarge)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = { openStartDatePicker() }) {
@@ -174,7 +185,7 @@ fun TimerEditDialog(
                     error = "End time must be after start time"
                 } else {
                     error = null
-                    onSave(start, end, tag.trim().ifBlank { null })
+                    onSave(start, end, tag.trim().ifBlank { null }, description.trim().ifBlank { null })
                 }
             }) {
                 Text("Save")

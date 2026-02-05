@@ -193,7 +193,8 @@ private fun DayColumn(
                     Text(
                         text = block.label,
                         color = Color.White,
-                        style = MaterialTheme.typography.labelSmall
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 2
                     )
                 }
             }
@@ -227,13 +228,21 @@ private fun timersForDay(
         val endMinutes = minutesSince(dayStart, displayEnd)
         val topFraction = (startMinutes / totalMinutes).coerceIn(0f, 1f)
         val heightFraction = ((endMinutes - startMinutes) / totalMinutes).coerceAtLeast(0.01f)
+        val tagPart = timer.tag?.takeIf { it.isNotBlank() }
+        val projectClient = listOfNotNull(timer.projectName, timer.clientName).joinToString(" · ").takeIf { it.isNotEmpty() }
+        val label = when {
+            tagPart != null && projectClient != null -> "$tagPart\n$projectClient"
+            tagPart != null -> tagPart
+            projectClient != null -> projectClient
+            else -> ""
+        }
         result.add(
             TimerBlock(
                 timer = timer,
                 topFraction = topFraction,
                 heightFraction = heightFraction,
                 isRunning = timer.endTime == null,
-                label = timer.tag?.ifBlank { "No tag" } ?: "No tag"
+                label = label
             )
         )
     }

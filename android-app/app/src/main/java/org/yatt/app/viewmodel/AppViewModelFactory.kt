@@ -23,6 +23,9 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
             modelClass.isAssignableFrom(DeviceSyncViewModel::class.java) -> {
                 DeviceSyncViewModel(container.deviceSyncRepository) as T
             }
+            modelClass.isAssignableFrom(ProjectsViewModel::class.java) -> {
+                ProjectsViewModel(container.apiService) as T
+            }
             else -> throw IllegalArgumentException("Unknown ViewModel class")
         }
     }
