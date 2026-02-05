@@ -9,7 +9,7 @@ PlasmoidItem {
     id: root
 
     property string apiUrl: {
-        var url = "https://time.command.pimenta.pt"
+        var url = Plasmoid.configuration.apiUrl || "http://localhost:3000"
         // Remove trailing slash to avoid double slashes in API calls
         while (url.endsWith("/")) {
             url = url.slice(0, -1)
@@ -30,14 +30,8 @@ PlasmoidItem {
     
     property bool wsConnected: false
     
-    // Daily goal (from API)
-    property int dayStartHour: 0   // hour (0-23) when "today" starts, from API preferences
-    property bool dailyGoalEnabled: false
-    property real defaultDailyGoalHours: 8
-    property bool includeWeekendGoals: false
-    property var dailyGoals: ({})
-    property int todayRemainingMs: -1
-    property int weekRemainingMs: -1
+    // Day starts at (0-23), from API preferences – used for today/week totals only (read-only in widget)
+    property int dayStartHour: 0
     
     property var availableTags: []
     property string newTag: ""
@@ -47,13 +41,18 @@ PlasmoidItem {
     property string newDescription: ""
     property string lastApiError: ""
     
+    // Time goal (read-only in widget – show today/week remaining, no edit)
+    property bool dailyGoalEnabled: false
+    property real defaultDailyGoalHours: 8
+    property bool includeWeekendGoals: false
+    property var dailyGoals: ({})
+    property int todayRemainingMs: -1
+    property int weekRemainingMs: -1
+    
     // Offline support properties
     property bool isOnline: false
     property int pendingSyncCount: 0
     property bool isSyncing: false
-
-    // Defer LocalStorage writes off the XHR callback to avoid blocking UI
-    property var _pendingTimersToSave: null
 
     // WebSocket for real-time updates
     WebSocket {
@@ -102,10 +101,10 @@ PlasmoidItem {
         }
     }
     
-    // Reconnect timer (slower to avoid hammering when WS not available)
+    // Reconnect timer
     Timer {
         id: reconnectTimer
-        interval: 20000
+        interval: 5000
         running: !wsConnected && token !== ""
         repeat: true
         onTriggered: {
@@ -129,7 +128,7 @@ PlasmoidItem {
         var db = getDatabase()
         db.transaction(function(tx) {
             // Timers cache
-            tx.executeSql('CREATE TABLE IF NOT EXISTS timers (id TEXT PRIMARY KEY, user_id INTEGER, start_time TEXT, end_time TEXT, tag TEXT, description TEXT, project_id INTEGER, local_id TEXT)')
+            tx.executeSql('CREATE TABLE IF NOT EXISTS timers (id TEXT PRIMARY KEY, user_id INTEGER, start_time TEXT, end_time TEXT, tag TEXT, local_id TEXT)')
             
             // Sync queue for offline operations
             tx.executeSql('CREATE TABLE IF NOT EXISTS sync_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, operation TEXT, timer_id TEXT, data TEXT, timestamp INTEGER)')
@@ -137,14 +136,10 @@ PlasmoidItem {
             // Metadata
             tx.executeSql('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)')
         })
-        // Migrate: add description and project_id if missing (existing installs)
+        // Migrate: add description and project_id if missing
         var db2 = getDatabase()
-        try {
-            db2.transaction(function(tx) { tx.executeSql('ALTER TABLE timers ADD COLUMN description TEXT') })
-        } catch (e) {}
-        try {
-            db2.transaction(function(tx) { tx.executeSql('ALTER TABLE timers ADD COLUMN project_id INTEGER') })
-        } catch (e) {}
+        try { db2.transaction(function(tx) { tx.executeSql('ALTER TABLE timers ADD COLUMN description TEXT') }) } catch (e) {}
+        try { db2.transaction(function(tx) { tx.executeSql('ALTER TABLE timers ADD COLUMN project_id INTEGER') }) } catch (e) {}
     }
     
     // Generate local ID for offline-created timers
@@ -311,15 +306,13 @@ PlasmoidItem {
         pendingSyncCount = 0
     }
     
-    // Update pending sync count (ensure int so UI binding updates)
+    // Update pending sync count
     function updatePendingSyncCount() {
         var db = getDatabase()
-        var count = 0
         db.readTransaction(function(tx) {
             var rs = tx.executeSql('SELECT COUNT(*) as count FROM sync_queue')
-            count = parseInt(String(rs.rows.item(0).count), 10) || 0
+            pendingSyncCount = rs.rows.item(0).count
         })
-        pendingSyncCount = count
     }
     
     // Get unique tags from local timers
@@ -335,7 +328,7 @@ PlasmoidItem {
         return tags
     }
     
-    // Check if a timer is running (no end_time) – handle API null/undefined and SQLite string "null"
+    // Check if a timer is running (no end_time)
     function isTimerRunning(timer) {
         if (!timer) return false
         var endTime = timer.end_time
@@ -374,7 +367,7 @@ PlasmoidItem {
     function processTimersData(timers) {
         var nowMs = Date.now()
         
-        // Find running timer (any timer without end_time)
+        // Find running timer
         currentTimer = null
         for (var i = 0; i < timers.length; i++) {
             if (isTimerRunning(timers[i])) {
@@ -398,7 +391,7 @@ PlasmoidItem {
 
         var dayTotal = 0
         var wkTotal = 0
-        var runningTodayMs = 0  // overlap of running timer with today (so we can do baseToday = dayTotal - this)
+        var runningTodayMs = 0
         var runningWeekMs = 0
 
         for (var j = 0; j < timers.length; j++) {
@@ -407,7 +400,7 @@ PlasmoidItem {
             var timerEnd = timer.end_time ? new Date(timer.end_time).getTime() : nowMs
             var isRunningTimer = isTimerRunning(timer)
 
-            // Overlap with today's window (todayStart .. tomorrowStart)
+            // Overlap with today's window
             var overlapStart = Math.max(timerStart, todayStartMs)
             var overlapEnd = Math.min(timerEnd, tomorrowStartMs)
             if (overlapEnd > overlapStart) {
@@ -416,7 +409,7 @@ PlasmoidItem {
                 if (isRunningTimer) runningTodayMs = seg
             }
 
-            // Overlap with this week (weekStart .. now)
+            // Overlap with this week
             var wkOverlapStart = Math.max(timerStart, weekStartMs)
             var wkOverlapEnd = timerEnd
             if (wkOverlapEnd > wkOverlapStart) {
@@ -444,30 +437,17 @@ PlasmoidItem {
             updatePendingSyncCount()
         }
     }
-
-    // Defer pending count update to next tick so UI sees it after sync complete
-    Timer {
-        id: deferPendingCountUpdate
-        interval: 0
-        running: false
-        repeat: false
-        onTriggered: updatePendingSyncCount()
-    }
     
-    // Sync pending operations with server. Pass true to force sync when user clicks (ignore isOnline).
-    function syncWithServer(force) {
-        if (isSyncing) return
-        if (!force && !isOnline) return
-
+    // Sync pending operations with server
+    function syncWithServer() {
+        if (isSyncing || !isOnline) return
+        
         var queue = getSyncQueue()
-        if (queue.length === 0) {
-            updatePendingSyncCount()
-            return
-        }
-
+        if (queue.length === 0) return
+        
         console.log("YATT: Starting sync, " + queue.length + " operations pending")
         isSyncing = true
-
+        
         processNextSyncItem(queue, 0)
     }
     
@@ -476,11 +456,8 @@ PlasmoidItem {
         if (index >= queue.length) {
             console.log("YATT: Sync complete")
             isSyncing = false
-            // Defer count update so UI definitely sees it after all callbacks
-            deferPendingCountUpdate.running = true
-            fetchTimers()
-            fetchProjects()
-            fetchClients()
+            updatePendingSyncCount()
+            fetchTimers()  // Refresh from server
             return
         }
         
@@ -545,9 +522,8 @@ PlasmoidItem {
     }
     
     function syncUpdateTimer(item, queue, index) {
-        // Orphaned update for a timer that was never created on server - remove so count doesn't stay stuck
+        // Skip if it's still a local ID (create not synced yet)
         if (isLocalId(item.timer_id)) {
-            removeSyncQueueItem(item.id)
             processNextSyncItem(queue, index + 1)
             return
         }
@@ -583,9 +559,8 @@ PlasmoidItem {
     }
     
     function syncStopTimer(item, queue, index) {
-        // Orphaned stop for a timer that was never created on server - remove so count doesn't stay stuck
+        // Skip if it's still a local ID (create not synced yet)
         if (isLocalId(item.timer_id)) {
-            removeSyncQueueItem(item.id)
             processNextSyncItem(queue, index + 1)
             return
         }
@@ -717,7 +692,6 @@ PlasmoidItem {
             if (isRunning && currentTimer) {
                 var start = new Date(currentTimer.start_time).getTime()
                 currentElapsed = Date.now() - start
-                // Update totals in real-time
                 todayTotal = baseToday + currentElapsed
                 weekTotal = baseWeek + currentElapsed
                 if (dailyGoalEnabled) updateGoalRemaining()
@@ -725,55 +699,13 @@ PlasmoidItem {
         }
     }
 
-    // Defer heavy init so we don't block the shell on load (LocalStorage can block)
-    Timer {
-        id: deferredInit
-        interval: 0
-        running: true
-        repeat: false
-        onTriggered: doDeferredInit()
-    }
-
-    // Fallback polling; only when token set (slower when no WS to reduce main-thread load)
+    // Fallback polling (less frequent when WebSocket is connected)
     Timer {
         id: refreshTimer
-        interval: wsConnected ? 60000 : 30000
-        running: token !== ""
+        interval: wsConnected ? 60000 : 10000
+        running: true
         repeat: true
         onTriggered: fetchTimers()
-    }
-
-    // Defer LocalStorage write to next tick so XHR callback returns quickly
-    Timer {
-        id: deferSaveTimersTimer
-        interval: 0
-        running: false
-        repeat: false
-        onTriggered: {
-            if (_pendingTimersToSave) {
-                saveTimersToLocal(_pendingTimersToSave)
-                _pendingTimersToSave = null
-            }
-        }
-    }
-
-    // Stagger remaining API calls after init so callbacks don't pile up and freeze Plasma
-    property int _staggerStep: 0
-    Timer {
-        id: staggerTimer
-        interval: 400
-        running: false
-        repeat: true
-        onTriggered: {
-            _staggerStep++
-            if (_staggerStep === 1) fetchTags()
-            else if (_staggerStep === 2) fetchProjects()
-            else if (_staggerStep === 3) fetchClients()
-            else if (_staggerStep === 4) {
-                fetchPreferences()
-                staggerTimer.running = false
-            }
-        }
     }
 
     compactRepresentation: CompactRepresentation {}
@@ -784,36 +716,55 @@ PlasmoidItem {
     toolTipMainText: isRunning ? "Timer Running" : "No Timer"
     toolTipSubText: isRunning ? formatDuration(currentElapsed) : "Click to open"
 
-    function toDateKey(date) {
-        var y = date.getFullYear()
-        var m = String(date.getMonth() + 1).padStart(2, '0')
-        var d = String(date.getDate()).padStart(2, '0')
-        return y + "-" + m + "-" + d
+    Component.onCompleted: {
+        initDatabase()
+        updatePendingSyncCount()
+        
+        if (token) {
+            // Load from local storage first for instant display
+            var localTimers = getTimersFromLocal()
+            if (localTimers.length > 0) {
+                processTimersData(localTimers)
+                availableTags = getLocalTags()
+            }
+            
+            fetchPreferences()
+            checkOnlineStatus()
+            fetchTimers()
+            fetchTags()
+            fetchProjects()
+            fetchClients()
+        }
     }
 
+    // Fetch user preferences (day start, time goal, etc.) – read-only in widget
     function fetchPreferences() {
         apiRequest("/auth/preferences", "GET", null, function(prefs) {
             if (prefs) {
-                var h = prefs.dayStartHour
-                if (h !== undefined && h !== null) dayStartHour = Math.max(0, Math.min(23, parseInt(String(h), 10) || 0))
+                if (prefs.dayStartHour !== undefined && prefs.dayStartHour !== null) {
+                    var h = parseInt(String(prefs.dayStartHour), 10)
+                    if (!isNaN(h)) dayStartHour = Math.max(0, Math.min(23, h))
+                }
                 if (typeof prefs.dailyGoalEnabled === 'boolean') dailyGoalEnabled = prefs.dailyGoalEnabled
                 if (prefs.defaultDailyGoalHours != null) defaultDailyGoalHours = Number(prefs.defaultDailyGoalHours) || 8
                 if (prefs.includeWeekendGoals === true) includeWeekendGoals = true
             }
             if (dailyGoalEnabled) fetchDailyGoals()
-            // Re-fetch timers so today/week totals use the correct day boundary (force in case first fetch still loading)
-            fetchTimers(true)
+            if (token) fetchTimers()
         }, function() {})
     }
-
+    
     function fetchDailyGoals() {
         if (!dailyGoalEnabled) return
         var now = new Date()
         var day = now.getDay()
-        var mondayOffset = day === 0 ? -6 : 1 - day
-        var monday = new Date(now)
-        monday.setDate(now.getDate() + mondayOffset)
-        monday.setHours(0, 0, 0, 0)
+        var hour = (typeof dayStartHour === 'number' && !isNaN(dayStartHour)) ? Math.max(0, Math.min(23, dayStartHour)) : 0
+        var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        if (now.getHours() < hour) todayStart.setDate(todayStart.getDate() - 1)
+        todayStart.setHours(hour, 0, 0, 0)
+        var mondayOffset = (day === 0 ? -6 : 1 - day)
+        var monday = new Date(todayStart)
+        monday.setDate(todayStart.getDate() + mondayOffset)
         var from = toDateKey(monday)
         var toDate = new Date(monday)
         toDate.setDate(toDate.getDate() + 6)
@@ -823,7 +774,15 @@ PlasmoidItem {
             updateGoalRemaining()
         }, function() { dailyGoals = {} })
     }
-
+    
+    function toDateKey(date) {
+        var d = typeof date === 'number' ? new Date(date) : (typeof date === 'string' ? new Date(date) : date)
+        var y = d.getFullYear()
+        var m = String(d.getMonth() + 1).padStart(2, '0')
+        var day = String(d.getDate()).padStart(2, '0')
+        return y + "-" + m + "-" + day
+    }
+    
     function updateGoalRemaining() {
         if (!dailyGoalEnabled) {
             todayRemainingMs = -1
@@ -836,9 +795,7 @@ PlasmoidItem {
         var todayGoalHours = (includeWeekendGoals || (day !== 0 && day !== 6)) ? (dailyGoals[todayKey] != null ? dailyGoals[todayKey] : defaultDailyGoalHours) : 0
         var todayGoalMs = todayGoalHours * 3600000
         todayRemainingMs = todayGoalHours > 0 ? Math.max(0, todayGoalMs - todayTotal) : -1
-
-        var day2 = now.getDay()
-        var mondayOffset = day2 === 0 ? -6 : 1 - day2
+        var mondayOffset = day === 0 ? -6 : 1 - day
         var monday = new Date(now)
         monday.setDate(now.getDate() + mondayOffset)
         var weekGoalHours = 0
@@ -856,58 +813,24 @@ PlasmoidItem {
         weekRemainingMs = Math.max(0, weekGoalMs - weekTotal)
     }
 
-    function doDeferredInit() {
-        initDatabase()
-        updatePendingSyncCount()
-
-        if (token) {
-            // Load from local storage first for instant display
-            var localTimers = getTimersFromLocal()
-            if (localTimers.length > 0) {
-                processTimersData(localTimers)
-                availableTags = getLocalTags()
-            }
-
-            // Fetch preferences first so dayStartHour is set before we process timers (same "today" as web app)
-            fetchPreferences()
-            checkOnlineStatus()
-            fetchTimers()
-            _staggerStep = 0
-            staggerTimer.running = true
-        }
-    }
-
     function fetchTags() {
         apiRequest("/timers/tags", "GET", null, function(tags) {
-            if (tags) {
-                availableTags = tags
-            }
-        }, function() {
-            // Offline fallback - use local tags
-            availableTags = getLocalTags()
-        })
+            if (tags) availableTags = tags
+        }, function() { availableTags = getLocalTags() })
     }
-
+    
     function fetchProjects() {
         apiRequest("/projects", "GET", null, function(projects) {
-            if (projects) {
-                availableProjects = projects
-            }
-        }, function() {
-            availableProjects = []
-        })
+            if (projects) availableProjects = projects
+        }, function() { availableProjects = [] })
     }
-
+    
     function fetchClients() {
         apiRequest("/clients", "GET", null, function(clients) {
-            if (clients) {
-                availableClients = clients
-            }
-        }, function() {
-            availableClients = []
-        })
+            if (clients) availableClients = clients
+        }, function() { availableClients = [] })
     }
-
+    
     function formatProjectLabel(project) {
         if (!project) return ""
         var parts = [project.name]
@@ -915,7 +838,7 @@ PlasmoidItem {
         if (project.client_name) parts.push(project.client_name)
         return parts.join(" - ")
     }
-
+    
     function findProjectById(id) {
         if (id === null || id === undefined) return null
         for (var i = 0; i < availableProjects.length; i++) {
@@ -923,8 +846,7 @@ PlasmoidItem {
         }
         return null
     }
-
-    // Filter projects by label (for searchable selector); returns array of { id, label }
+    
     function getFilteredProjects(query) {
         var q = (query || "").toLowerCase().trim()
         var result = []
@@ -1051,22 +973,14 @@ PlasmoidItem {
         }
     }
 
-    function fetchTimers(forceRefresh) {
-        if (!forceRefresh && loading) return
+    function fetchTimers() {
         loading = true
         apiRequest("/timers", "GET", null, function(timers) {
             loading = false
-            if (!timers || !Array.isArray(timers)) {
-                // Malformed response – fall back to local data like offline
-                var localTimers = getTimersFromLocal()
-                processTimersData(localTimers)
-                return
-            }
+            if (!timers || !Array.isArray(timers)) return
 
-            // Process immediately (fast); defer DB write to next tick so this callback doesn't block UI
+            saveTimersToLocal(timers)
             processTimersData(timers)
-            _pendingTimersToSave = timers
-            deferSaveTimersTimer.running = true
         }, function() {
             // Offline fallback - load from local storage
             loading = false
@@ -1104,10 +1018,9 @@ PlasmoidItem {
             // Start new timer
             var startTime = new Date().toISOString()
             var timerTag = (newTag && newTag.trim() !== "") ? newTag.trim() : null
-            
-            // Create locally and update UI immediately
             var timerDesc = (newDescription && newDescription.trim() !== "") ? newDescription.trim() : null
             var timerProjectId = (newProjectId !== undefined && newProjectId !== null && newProjectId !== "") ? newProjectId : null
+            
             var localId = generateLocalId()
             var localTimer = {
                 id: localId,
@@ -1121,10 +1034,9 @@ PlasmoidItem {
             }
             saveTimerToLocal(localTimer)
             
-            // Update UI state directly
             currentTimer = localTimer
             currentElapsed = 0
-            baseToday = todayTotal  // Current total becomes the base
+            baseToday = todayTotal
             baseWeek = weekTotal
             availableTags = getLocalTags()
             
@@ -1174,11 +1086,10 @@ PlasmoidItem {
                 addToSyncQueue('update', timerId, body)
             })
         } else {
-            // Already offline or local timer
             addToSyncQueue('update', timerId, body)
         }
     }
-
+    
     function updateRunningDescription() {
         if (!currentTimer) return
         var timerId = currentTimer.id
@@ -1192,7 +1103,7 @@ PlasmoidItem {
             addToSyncQueue('update', timerId, body)
         }
     }
-
+    
     function updateRunningProject() {
         if (!currentTimer) return
         var timerId = currentTimer.id

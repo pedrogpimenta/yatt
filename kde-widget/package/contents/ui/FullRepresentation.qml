@@ -86,7 +86,7 @@ PlasmaExtras.Representation {
             PlasmaExtras.Heading {
                 Layout.fillWidth: true
                 level: 1
-                text: "Time Command"
+                text: "YATT"
             }
             
             // Offline/sync status indicator
@@ -125,27 +125,21 @@ PlasmaExtras.Representation {
             PlasmaComponents.ToolButton {
                 icon.name: "view-refresh"
                 onClicked: {
-                    root.fetchTimers(true)   // force refresh so button always fetches even if loading was stuck
+                    root.fetchPreferences()
+                    root.fetchTimers()
+                    root.fetchTags()
                     root.fetchProjects()
                     root.fetchClients()
-                    root.fetchTags()
-                    if (root.pendingSyncCount > 0) {
-                        root.syncWithServer(true)
+                    if (root.isOnline && root.pendingSyncCount > 0) {
+                        root.syncWithServer()
                     }
                 }
                 PlasmaComponents.ToolTip { text: root.pendingSyncCount > 0 ? "Refresh & Sync" : "Refresh" }
             }
 
             PlasmaComponents.ToolButton {
-                icon.name: "edit-clear"
-                visible: root.pendingSyncCount > 0
-                onClicked: root.clearSyncQueue()
-                PlasmaComponents.ToolTip { text: "Clear pending sync (discard unsynced items)" }
-            }
-
-            PlasmaComponents.ToolButton {
                 icon.name: "internet-web-browser"
-                onClicked: Qt.openUrlExternally("https://time.command.pimenta.pt/")
+                onClicked: Qt.openUrlExternally("http://localhost:5173")
                 PlasmaComponents.ToolTip { text: "Open Web App" }
             }
 
@@ -236,36 +230,6 @@ PlasmaExtras.Representation {
                 }
             }
 
-            // Current tag (when running)
-            Text {
-                Layout.alignment: Qt.AlignHCenter
-                visible: root.isRunning && root.currentTimer && root.currentTimer.tag
-                text: root.currentTimer ? root.currentTimer.tag : ""
-                font.pointSize: 9
-                color: Kirigami.Theme.disabledTextColor
-            }
-
-            // Current project (when running)
-            Text {
-                Layout.alignment: Qt.AlignHCenter
-                visible: root.isRunning && root.currentTimer && root.findProjectById(root.currentTimer.project_id)
-                text: root.findProjectById(root.currentTimer ? root.currentTimer.project_id : null) ? root.formatProjectLabel(root.findProjectById(root.currentTimer.project_id)) : ""
-                font.pointSize: 8
-                color: Kirigami.Theme.disabledTextColor
-            }
-
-            // Current description (when running)
-            Text {
-                Layout.alignment: Qt.AlignHCenter
-                visible: root.isRunning && root.currentTimer && root.currentTimer.description
-                text: root.currentTimer ? root.currentTimer.description : ""
-                font.pointSize: 8
-                color: Kirigami.Theme.disabledTextColor
-                wrapMode: Text.WordWrap
-                Layout.maximumWidth: fullRoot.width - Kirigami.Units.gridUnit * 2
-                horizontalAlignment: Text.AlignHCenter
-            }
-
             // Edit start time form
             ColumnLayout {
                 Layout.fillWidth: true
@@ -307,112 +271,6 @@ PlasmaExtras.Representation {
                     PlasmaComponents.Button {
                         text: "Save"
                         onClicked: fullRoot.saveEdit()
-                    }
-                }
-            }
-        }
-
-        // Project selector (search/filter with keyboard, select only – no create/edit)
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 2
-
-            QQC2.TextField {
-                id: projectField
-                Layout.fillWidth: true
-                text: activeFocus ? fullRoot.projectSearchText : (root.findProjectById(root.newProjectId) ? root.formatProjectLabel(root.findProjectById(root.newProjectId)) : "")
-                placeholderText: "Project (optional) – type to search"
-                horizontalAlignment: Text.AlignHCenter
-                onTextChanged: {
-                    if (activeFocus) {
-                        fullRoot.projectSearchText = text
-                        fullRoot.showProjectSuggestions = true
-                    }
-                }
-                onActiveFocusChanged: {
-                    if (activeFocus) {
-                        fullRoot.projectSearchText = ""
-                        fullRoot.showProjectSuggestions = true
-                    } else {
-                        projectHideTimer.start()
-                    }
-                }
-            }
-
-            Timer {
-                id: projectHideTimer
-                interval: 150
-                onTriggered: fullRoot.showProjectSuggestions = false
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(projectSuggestionsColumn.height, Kirigami.Units.gridUnit * 8)
-                Layout.maximumHeight: Kirigami.Units.gridUnit * 8
-                visible: fullRoot.showProjectSuggestions && (root.availableProjects.length > 0 || fullRoot.projectSearchText.length > 0)
-                color: Kirigami.Theme.backgroundColor
-                border.color: Kirigami.Theme.disabledTextColor
-                border.width: 1
-                radius: Kirigami.Units.smallSpacing
-
-                ColumnLayout {
-                    id: projectSuggestionsColumn
-                    width: parent.width
-                    spacing: 0
-
-                    Repeater {
-                        model: root.getFilteredProjects(fullRoot.projectSearchText)
-
-                        delegate: QQC2.ItemDelegate {
-                            Layout.fillWidth: true
-                            text: modelData ? modelData.label : ""
-                            onClicked: {
-                                if (modelData) {
-                                    root.newProjectId = modelData.id
-                                    if (root.isRunning) {
-                                        root.updateRunningProject()
-                                    }
-                                }
-                                fullRoot.projectSearchText = ""
-                                fullRoot.showProjectSuggestions = false
-                                projectField.focus = false
-                            }
-                        }
-                    }
-
-                    // "No project" option to clear selection
-                    QQC2.ItemDelegate {
-                        Layout.fillWidth: true
-                        text: "— No project —"
-                        onClicked: {
-                            root.newProjectId = null
-                            if (root.isRunning) {
-                                root.updateRunningProject()
-                            }
-                            fullRoot.projectSearchText = ""
-                            fullRoot.showProjectSuggestions = false
-                            projectField.focus = false
-                        }
-                    }
-                }
-            }
-        }
-
-        // Description input
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 2
-
-            QQC2.TextField {
-                id: descriptionField
-                Layout.fillWidth: true
-                text: root.newDescription
-                placeholderText: root.isRunning ? "Change description..." : "Description (optional)"
-                horizontalAlignment: Text.AlignHCenter
-                onTextChanged: root.newDescription = text
-                onEditingFinished: {
-                    if (root.isRunning) {
-                        root.updateRunningDescription()
                     }
                 }
             }
@@ -492,6 +350,150 @@ PlasmaExtras.Representation {
             }
         }
 
+        // Project selector (select only – no add/edit)
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 2
+
+            QQC2.TextField {
+                id: projectField
+                Layout.fillWidth: true
+                text: activeFocus ? fullRoot.projectSearchText : (root.findProjectById(root.newProjectId) ? root.formatProjectLabel(root.findProjectById(root.newProjectId)) : "")
+                placeholderText: "Project (optional) – type to search"
+                horizontalAlignment: Text.AlignHCenter
+                onTextChanged: {
+                    if (activeFocus) {
+                        fullRoot.projectSearchText = text
+                        fullRoot.showProjectSuggestions = true
+                    }
+                }
+                onActiveFocusChanged: {
+                    if (activeFocus) {
+                        fullRoot.projectSearchText = ""
+                        fullRoot.showProjectSuggestions = true
+                    } else {
+                        projectHideTimer.start()
+                    }
+                }
+            }
+
+            Timer {
+                id: projectHideTimer
+                interval: 150
+                onTriggered: fullRoot.showProjectSuggestions = false
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(projectSuggestionsColumn.height, Kirigami.Units.gridUnit * 8)
+                Layout.maximumHeight: Kirigami.Units.gridUnit * 8
+                visible: fullRoot.showProjectSuggestions && (root.availableProjects.length > 0 || fullRoot.projectSearchText.length > 0)
+                color: Kirigami.Theme.backgroundColor
+                border.color: Kirigami.Theme.disabledTextColor
+                border.width: 1
+                radius: Kirigami.Units.smallSpacing
+
+                ColumnLayout {
+                    id: projectSuggestionsColumn
+                    width: parent.width
+                    spacing: 0
+
+                    Repeater {
+                        model: root.getFilteredProjects(fullRoot.projectSearchText)
+
+                        delegate: QQC2.ItemDelegate {
+                            Layout.fillWidth: true
+                            text: modelData ? modelData.label : ""
+                            onClicked: {
+                                if (modelData) {
+                                    root.newProjectId = modelData.id
+                                    if (root.isRunning) {
+                                        root.updateRunningProject()
+                                    }
+                                }
+                                fullRoot.projectSearchText = ""
+                                fullRoot.showProjectSuggestions = false
+                                projectField.focus = false
+                            }
+                        }
+                    }
+
+                    QQC2.ItemDelegate {
+                        Layout.fillWidth: true
+                        text: "— No project —"
+                        onClicked: {
+                            root.newProjectId = null
+                            if (root.isRunning) {
+                                root.updateRunningProject()
+                            }
+                            fullRoot.projectSearchText = ""
+                            fullRoot.showProjectSuggestions = false
+                            projectField.focus = false
+                        }
+                    }
+                }
+            }
+        }
+
+        // Description input
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 2
+
+            QQC2.TextField {
+                id: descriptionField
+                Layout.fillWidth: true
+                text: root.newDescription
+                placeholderText: root.isRunning ? "Change description..." : "Description (optional)"
+                horizontalAlignment: Text.AlignHCenter
+                onTextChanged: root.newDescription = text
+                onEditingFinished: {
+                    if (root.isRunning) {
+                        root.updateRunningDescription()
+                    }
+                }
+            }
+        }
+
+        // Current project/type/client when running (read-only)
+        Text {
+            Layout.alignment: Qt.AlignHCenter
+            visible: root.isRunning && root.currentTimer && root.findProjectById(root.currentTimer.project_id)
+            text: root.findProjectById(root.currentTimer ? root.currentTimer.project_id : null) ? root.formatProjectLabel(root.findProjectById(root.currentTimer.project_id)) : ""
+            font.pointSize: 8
+            color: Kirigami.Theme.disabledTextColor
+        }
+
+        // Current description when running
+        Text {
+            Layout.alignment: Qt.AlignHCenter
+            visible: root.isRunning && root.currentTimer && root.currentTimer.description
+            text: root.currentTimer ? root.currentTimer.description : ""
+            font.pointSize: 8
+            color: Kirigami.Theme.disabledTextColor
+            wrapMode: Text.WordWrap
+            Layout.maximumWidth: fullRoot.width - Kirigami.Units.gridUnit * 2
+            horizontalAlignment: Text.AlignHCenter
+        }
+
+        // Start/Stop button
+        PlasmaComponents.Button {
+            Layout.fillWidth: true
+            Layout.preferredHeight: Kirigami.Units.gridUnit * 2.5
+            text: root.isRunning ? "Stop" : "Start"
+            icon.name: root.isRunning ? "media-playback-stop" : "media-playback-start"
+            onClicked: root.toggleTimer()
+        }
+
+        // Day starts at (read-only – from preferences)
+        Text {
+            Layout.alignment: Qt.AlignHCenter
+            visible: root.dayStartHour > 0
+            text: "Day starts at " + String(root.dayStartHour).padStart(2, '0') + ":00"
+            font.pointSize: 8
+            color: Kirigami.Theme.disabledTextColor
+        }
+
         // Stats
         GridLayout {
             Layout.fillWidth: true
@@ -524,6 +526,7 @@ PlasmaExtras.Representation {
                         font.pointSize: 12
                         color: Kirigami.Theme.textColor
                     }
+                    // Time goal (read-only)
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         visible: root.dailyGoalEnabled && root.todayRemainingMs >= 0
@@ -559,6 +562,7 @@ PlasmaExtras.Representation {
                         font.pointSize: 12
                         color: Kirigami.Theme.textColor
                     }
+                    // Time goal (read-only)
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         visible: root.dailyGoalEnabled && root.weekRemainingMs >= 0
