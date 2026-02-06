@@ -255,6 +255,36 @@ ws.onmessage = (event) => {
 }
 ```
 
+## OneDrive Sync (MVP)
+
+YATT supports an optional OneDrive-based sync mode for the no-account local flow.
+Data is end-to-end encrypted and stored in your OneDrive app folder.
+
+### Web setup
+
+1. Create an Azure App Registration for a Single Page App.
+2. Add a redirect URI for your web app (e.g. `http://localhost:5173`).
+3. Grant delegated permissions:
+   - `Files.ReadWrite.AppFolder`
+   - `User.Read`
+   - `offline_access`
+4. Create `web/.env` with:
+
+```env
+VITE_ONEDRIVE_CLIENT_ID=your-client-id-here
+```
+
+### Android setup
+
+1. Use the same Azure App Registration.
+2. Set the OneDrive client ID in `android-app/app/src/main/res/values/strings.xml`
+   (see `onedrive_client_id`).
+
+### Notes
+
+- The encryption passphrase is never sent to the server.
+- Clearing local data disconnects OneDrive for that device but leaves the cloud file intact.
+
 ## Environment Variables
 
 ### API

@@ -339,6 +339,68 @@ export async function getMeta(key) {
   })
 }
 
+const DELETED_TIMERS_KEY = 'deleted_timers'
+const DELETED_PROJECTS_KEY = 'deleted_projects'
+
+export async function getDeletedTimers() {
+  return (await getMeta(DELETED_TIMERS_KEY)) || []
+}
+
+export async function getDeletedProjects() {
+  return (await getMeta(DELETED_PROJECTS_KEY)) || []
+}
+
+async function setDeletedList(key, list) {
+  await setMeta(key, list)
+}
+
+function mergeDeletionEntry(existing, incoming) {
+  if (!existing) return incoming
+  const existingTime = Date.parse(existing.deleted_at || '')
+  const incomingTime = Date.parse(incoming.deleted_at || '')
+  if (Number.isNaN(existingTime)) return incoming
+  if (Number.isNaN(incomingTime)) return existing
+  return incomingTime >= existingTime ? incoming : existing
+}
+
+async function addDeletedItem(key, id, deletedAt = new Date().toISOString()) {
+  const current = (await getMeta(key)) || []
+  const byId = new Map(current.map((entry) => [String(entry.id), entry]))
+  const next = mergeDeletionEntry(byId.get(String(id)), { id, deleted_at: deletedAt })
+  byId.set(String(id), next)
+  await setDeletedList(key, Array.from(byId.values()))
+}
+
+async function removeDeletedItem(key, id) {
+  const current = (await getMeta(key)) || []
+  const filtered = current.filter((entry) => String(entry.id) !== String(id))
+  await setDeletedList(key, filtered)
+}
+
+export async function addDeletedTimer(id, deletedAt) {
+  await addDeletedItem(DELETED_TIMERS_KEY, id, deletedAt)
+}
+
+export async function addDeletedProject(id, deletedAt) {
+  await addDeletedItem(DELETED_PROJECTS_KEY, id, deletedAt)
+}
+
+export async function setDeletedTimers(list) {
+  await setDeletedList(DELETED_TIMERS_KEY, list || [])
+}
+
+export async function setDeletedProjects(list) {
+  await setDeletedList(DELETED_PROJECTS_KEY, list || [])
+}
+
+export async function removeDeletedTimer(id) {
+  await removeDeletedItem(DELETED_TIMERS_KEY, id)
+}
+
+export async function removeDeletedProject(id) {
+  await removeDeletedItem(DELETED_PROJECTS_KEY, id)
+}
+
 // Clear all local data (for logout)
 export async function clearAllData() {
   const database = await openDB()

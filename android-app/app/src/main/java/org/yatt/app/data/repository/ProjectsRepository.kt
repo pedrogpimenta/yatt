@@ -60,7 +60,16 @@ class ProjectsRepository(
     suspend fun createProject(name: String, type: String?, clientName: String?, clientId: Long?) = withContext(Dispatchers.IO) {
         if (settingsStore.localModeFlow.first()) {
             val id = "local_project_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}"
-            projectDao.insert(ProjectEntity(id = id, name = name, type = type, clientName = clientName))
+            projectDao.insert(
+                ProjectEntity(
+                    id = id,
+                    name = name,
+                    type = type,
+                    clientName = clientName,
+                    updatedAt = java.time.Instant.now().toString()
+                )
+            )
+            markCloudDirty()
         } else {
             val created = apiService.createProject(name, type, clientName, clientId)
             apiProjectsState.value = apiProjectsState.value + created.toItem()
@@ -70,8 +79,16 @@ class ProjectsRepository(
     suspend fun updateProject(id: String, name: String, type: String?, clientName: String?, clientId: Long?) = withContext(Dispatchers.IO) {
         if (settingsStore.localModeFlow.first()) {
             projectDao.get(id)?.let { existing ->
-                projectDao.insert(existing.copy(name = name, type = type, clientName = clientName))
+                projectDao.insert(
+                    existing.copy(
+                        name = name,
+                        type = type,
+                        clientName = clientName,
+                        updatedAt = java.time.Instant.now().toString()
+                    )
+                )
             }
+            markCloudDirty()
         } else {
             val longId = id.toLongOrNull() ?: return@withContext
             val updated = apiService.updateProject(longId, name, type, clientName, clientId)
@@ -82,6 +99,11 @@ class ProjectsRepository(
     suspend fun deleteProject(id: String) = withContext(Dispatchers.IO) {
         if (settingsStore.localModeFlow.first()) {
             projectDao.delete(id)
+            val cloudProvider = settingsStore.cloudProviderFlow.first()
+            if (!cloudProvider.isNullOrBlank()) {
+                settingsStore.addDeletedProject(id, java.time.Instant.now().toString())
+                markCloudDirty()
+            }
         } else {
             val longId = id.toLongOrNull() ?: return@withContext
             apiService.deleteProject(longId)
@@ -104,4 +126,11 @@ class ProjectsRepository(
     )
 
     private fun ProjectItem.toEntity() = ProjectEntity(id = id, name = name, type = type, clientName = clientName)
+
+    private suspend fun markCloudDirty() {
+        val cloudProvider = settingsStore.cloudProviderFlow.first()
+        if (!cloudProvider.isNullOrBlank()) {
+            settingsStore.setCloudDirty(true)
+        }
+    }
 }

@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Time Command</string>
+    <string name="onedrive_client_id">YOUR_CLIENT_ID</string>
+    <string name="onedrive_tenant">common</string>
 </resources>

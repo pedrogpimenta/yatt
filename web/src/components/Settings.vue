@@ -5,6 +5,7 @@ import { preferences } from '../preferences.js'
 import { formatDate, formatTime } from '../preferences.js'
 import { formatProjectLabel } from '../projects.js'
 import * as offlineStorage from '../offlineStorage.js'
+import { getLastSyncAt, markDirty as markCloudDirty } from '../onedriveSync.js'
 import DeviceSync from './DeviceSync.vue'
 import ClientSelector from './ClientSelector.vue'
 
@@ -32,8 +33,11 @@ const success = ref('')
 
 // Local mode detection
 const isLocalMode = computed(() => api.isLocalMode())
+const isCloudMode = computed(() => api.isCloudMode())
 const showSyncModal = ref(false)
 const showLogoutConfirm = ref(false)
+const logoutMode = ref(null)
+const lastCloudSyncAt = ref(getLastSyncAt())
 
 // Password change form
 const currentPassword = ref('')
@@ -73,6 +77,7 @@ async function fetchUser() {
 }
 
 watch(() => preferences.dayStartHour, async (newValue, oldValue) => {
+  if (isCloudMode.value) markCloudDirty()
   if (isLocalMode.value) return
   if (newValue === oldValue || typeof newValue !== 'number') return
   try {
@@ -82,7 +87,16 @@ watch(() => preferences.dayStartHour, async (newValue, oldValue) => {
   }
 })
 
+watch(() => preferences.dateFormat, () => {
+  if (isCloudMode.value) markCloudDirty()
+})
+
+watch(() => preferences.timeFormat, () => {
+  if (isCloudMode.value) markCloudDirty()
+})
+
 function saveGoalPreferences() {
+  if (isCloudMode.value) markCloudDirty()
   if (isLocalMode.value) return
   api.updateUserPreferences({
     dailyGoalEnabled: preferences.dailyGoalEnabled,
@@ -101,6 +115,22 @@ function handleSynced() {
   setTimeout(() => {
     window.location.reload()
   }, 500)
+}
+
+async function syncCloudNow() {
+  error.value = ''
+  success.value = ''
+  try {
+    const result = await api.attemptSync()
+    if (result.synced > 0) {
+      success.value = 'OneDrive sync completed'
+      lastCloudSyncAt.value = getLastSyncAt()
+    } else {
+      success.value = 'OneDrive is already up to date'
+    }
+  } catch (err) {
+    error.value = 'OneDrive sync failed: ' + err.message
+  }
 }
 
 async function handleChangePassword() {
@@ -217,7 +247,11 @@ async function downloadCSV() {
 }
 
 function handleLogout() {
-  if (isLocalMode.value) {
+  if (isCloudMode.value) {
+    logoutMode.value = 'cloud'
+    showLogoutConfirm.value = true
+  } else if (isLocalMode.value) {
+    logoutMode.value = 'local'
     showLogoutConfirm.value = true
   } else {
     emit('logout')
@@ -226,11 +260,13 @@ function handleLogout() {
 
 function confirmLogout() {
   showLogoutConfirm.value = false
+  logoutMode.value = null
   emit('logout')
 }
 
 function cancelLogout() {
   showLogoutConfirm.value = false
+  logoutMode.value = null
 }
 
 async function fetchProjects() {
@@ -419,13 +455,26 @@ onUnmounted(() => {
         </section>
 
         <!-- Local Mode Info & Sync -->
-        <section v-if="isLocalMode" class="settings-section">
+        <section v-if="isLocalMode && !isCloudMode" class="settings-section">
           <h3>Local Mode</h3>
           <p class="section-description">
             You're using the app without an account. Data is stored locally on this device.
           </p>
           <button @click="showSyncModal = true" class="sync-btn">
             Sync with another device
+          </button>
+        </section>
+
+        <section v-if="isCloudMode" class="settings-section">
+          <h3>OneDrive Sync</h3>
+          <p class="section-description">
+            Your data is encrypted and stored in your OneDrive app folder.
+          </p>
+          <p class="preference-hint">
+            Last sync: {{ lastCloudSyncAt ? new Date(lastCloudSyncAt).toLocaleString() : 'Never' }}
+          </p>
+          <button @click="syncCloudNow" class="sync-btn">
+            Sync now
           </button>
         </section>
 
@@ -546,7 +595,7 @@ onUnmounted(() => {
         <!-- Logout -->
         <section class="settings-section logout-section">
           <button @click="handleLogout" class="logout-btn">
-            {{ isLocalMode ? 'Exit Local Mode' : 'Logout' }}
+            {{ isCloudMode ? 'Disconnect OneDrive' : (isLocalMode ? 'Exit Local Mode' : 'Logout') }}
           </button>
         </section>
       </div>
@@ -596,13 +645,18 @@ onUnmounted(() => {
   <!-- Logout Confirmation Modal -->
   <div v-if="showLogoutConfirm" class="confirm-overlay" @click.self="cancelLogout">
     <div class="confirm-modal">
-      <h3>Exit Local Mode?</h3>
+      <h3>{{ logoutMode === 'cloud' ? 'Disconnect OneDrive?' : 'Exit Local Mode?' }}</h3>
       <p class="confirm-warning">
-        All your timers and data stored on this device will be permanently deleted. 
+        All your timers and data stored on this device will be permanently deleted.
         This action cannot be undone.
       </p>
       <p class="confirm-hint">
-        If you want to keep your data, sync with another device first or create an account.
+        <span v-if="logoutMode === 'cloud'">
+          Your OneDrive data will remain, but this device will stop syncing.
+        </span>
+        <span v-else>
+          If you want to keep your data, sync with another device first or create an account.
+        </span>
       </p>
       <div class="confirm-actions">
         <button @click="cancelLogout" class="btn-cancel">Cancel</button>

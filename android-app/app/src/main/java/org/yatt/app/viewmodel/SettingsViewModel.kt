@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import org.yatt.app.data.SettingsStore
 import org.yatt.app.data.model.UserProfile
 import org.yatt.app.data.repository.AuthRepository
+import org.yatt.app.data.repository.OneDriveSyncRepository
 import org.yatt.app.data.repository.TimerRepository
 
 data class SettingsUiState(
@@ -21,11 +22,14 @@ data class SettingsUiState(
 class SettingsViewModel(
     private val settingsStore: SettingsStore,
     private val authRepository: AuthRepository,
-    private val timerRepository: TimerRepository
+    private val timerRepository: TimerRepository,
+    private val oneDriveSyncRepository: OneDriveSyncRepository
 ) : ViewModel() {
     val preferencesFlow = settingsStore.preferencesFlow
     val authTokenFlow = settingsStore.authTokenFlow
     val localModeFlow = settingsStore.localModeFlow
+    val cloudProviderFlow = settingsStore.cloudProviderFlow
+    val cloudLastSyncAtFlow = settingsStore.cloudLastSyncAtFlow
 
     private val uiState = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = uiState.stateIn(
@@ -129,7 +133,23 @@ class SettingsViewModel(
             if (clearLocalData) {
                 timerRepository.clearAllLocalData()
             }
+            oneDriveSyncRepository.disconnect()
             authRepository.logout()
+        }
+    }
+
+    fun syncOneDriveNow() {
+        viewModelScope.launch {
+            uiState.value = uiState.value.copy(loading = true, error = null, success = null)
+            try {
+                val synced = oneDriveSyncRepository.syncNow()
+                uiState.value = uiState.value.copy(
+                    loading = false,
+                    success = if (synced > 0) "OneDrive synced" else "OneDrive is up to date"
+                )
+            } catch (ex: Exception) {
+                uiState.value = uiState.value.copy(loading = false, error = ex.message)
+            }
         }
     }
 

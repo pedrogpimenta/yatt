@@ -1,5 +1,7 @@
 import * as offlineStorage from './offlineStorage.js'
 import { preferences } from './preferences.js'
+import { getDeviceId, isCloudMode, isLocalMode, setCloudMode, setLocalMode } from './authState.js'
+import * as oneDriveSync from './onedriveSync.js'
 
 const API_BASE = '/api'
 
@@ -8,44 +10,13 @@ let isOnline = navigator.onLine
 let onlineListeners = new Set()
 let syncInProgress = false
 
-// Local-only mode (no account)
-const LOCAL_MODE_KEY = 'yatt_local_mode'
-const DEVICE_ID_KEY = 'yatt_device_id'
-
-function isLocalMode() {
-  return localStorage.getItem(LOCAL_MODE_KEY) === 'true'
-}
-
-function setLocalMode(enabled) {
-  if (enabled) {
-    localStorage.setItem(LOCAL_MODE_KEY, 'true')
-    // Generate a device ID for sync purposes
-    if (!localStorage.getItem(DEVICE_ID_KEY)) {
-      localStorage.setItem(DEVICE_ID_KEY, generateDeviceId())
-    }
-  } else {
-    localStorage.removeItem(LOCAL_MODE_KEY)
-  }
-}
-
-function getDeviceId() {
-  let deviceId = localStorage.getItem(DEVICE_ID_KEY)
-  if (!deviceId) {
-    deviceId = generateDeviceId()
-    localStorage.setItem(DEVICE_ID_KEY, deviceId)
-  }
-  return deviceId
-}
-
-function generateDeviceId() {
-  return `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-}
+// Local-only mode (no account) and cloud sync mode
 
 // Initialize online/offline listeners
 window.addEventListener('online', () => {
   isOnline = true
   notifyOnlineStatus(true)
-  if (!isLocalMode()) {
+  if (!isLocalMode() || isCloudMode()) {
     attemptSync()
   }
 })
@@ -75,6 +46,9 @@ function getOnlineStatus() {
 
 function getToken() {
   // In local mode, return a fake token to indicate "logged in"
+  if (isCloudMode()) {
+    return 'cloud_mode'
+  }
   if (isLocalMode()) {
     return 'local_mode'
   }
@@ -88,6 +62,7 @@ function setToken(token) {
 function clearToken() {
   localStorage.removeItem('token')
   setLocalMode(false)
+  setCloudMode(null)
 }
 
 async function logout() {
@@ -95,8 +70,9 @@ async function logout() {
   await offlineStorage.clearAllData()
   // Clear token and local mode
   localStorage.removeItem('token')
-  localStorage.removeItem(LOCAL_MODE_KEY)
-  localStorage.removeItem(DEVICE_ID_KEY)
+  setLocalMode(false)
+  setCloudMode(null)
+  await oneDriveSync.disconnect()
   // Disconnect WebSocket
   disconnectWebSocket()
 }
@@ -154,6 +130,10 @@ async function tryRequest(endpoint, options = {}) {
 async function attemptSync() {
   if (!isOnline || syncInProgress || !getToken()) {
     return { success: false, synced: 0 }
+  }
+
+  if (isCloudMode()) {
+    return await oneDriveSync.syncNow()
   }
 
   syncInProgress = true
@@ -253,6 +233,9 @@ async function attemptSync() {
 }
 
 async function getPendingSyncCount() {
+  if (isCloudMode()) {
+    return await oneDriveSync.getPendingCount()
+  }
   return await offlineStorage.getPendingSyncCount()
 }
 
@@ -486,14 +469,20 @@ export const api = {
     }
 
     if (isLocalMode()) {
+      const updatedAt = new Date().toISOString()
       const localProject = {
         id: offlineStorage.generateProjectId(),
         name: payload.name,
         type: payload.type,
         client_id: null,
-        client_name: payload.clientName || null
+        client_name: payload.clientName || null,
+        updated_at: updatedAt
       }
       await offlineStorage.saveProject(localProject)
+      if (isCloudMode()) {
+        await offlineStorage.addToSyncQueue({ type: 'project_create', projectId: localProject.id })
+        oneDriveSync.markDirty()
+      }
       return localProject
     }
 
@@ -523,7 +512,8 @@ export const api = {
       const updated = {
         ...existing,
         name: payload.name ?? existing.name,
-        type: Object.prototype.hasOwnProperty.call(data, 'type') ? (payload.type || null) : existing.type
+        type: Object.prototype.hasOwnProperty.call(data, 'type') ? (payload.type || null) : existing.type,
+        updated_at: new Date().toISOString()
       }
       if (Object.prototype.hasOwnProperty.call(data, 'clientId')) {
         updated.client_id = payload.clientId
@@ -532,6 +522,10 @@ export const api = {
         updated.client_name = payload.clientName || null
       }
       await offlineStorage.saveProject(updated)
+      if (isCloudMode()) {
+        await offlineStorage.addToSyncQueue({ type: 'project_update', projectId: id })
+        oneDriveSync.markDirty()
+      }
       return updated
     }
     const result = await tryRequest(`/projects/${id}`, {
@@ -548,6 +542,11 @@ export const api = {
   async deleteProject(id) {
     if (isLocalMode()) {
       await offlineStorage.deleteProject(id)
+      if (isCloudMode()) {
+        await offlineStorage.addDeletedProject(id, new Date().toISOString())
+        await offlineStorage.addToSyncQueue({ type: 'project_delete', projectId: id })
+        oneDriveSync.markDirty()
+      }
       return
     }
     await request(`/projects/${id}`, { method: 'DELETE' })
@@ -605,13 +604,19 @@ export const api = {
 
     // In local mode, always create locally
     if (isLocalMode()) {
+      const updatedAt = new Date().toISOString()
       const localId = offlineStorage.generateLocalId()
       const localTimer = {
         id: localId,
         ...timerData,
-        end_time: timerData.end_time || null
+        end_time: timerData.end_time || null,
+        updated_at: updatedAt
       }
       await offlineStorage.saveTimer(localTimer)
+      if (isCloudMode()) {
+        await offlineStorage.addToSyncQueue({ type: 'create', localId: localId })
+        oneDriveSync.markDirty()
+      }
       return localTimer
     }
 
@@ -631,7 +636,8 @@ export const api = {
     const localTimer = {
       id: localId,
       ...timerData,
-      end_time: timerData.end_time || null
+      end_time: timerData.end_time || null,
+      updated_at: new Date().toISOString()
     }
 
     await offlineStorage.saveTimer(localTimer)
@@ -648,12 +654,16 @@ export const api = {
     // Always update local storage first
     const existingTimer = await offlineStorage.getTimer(id)
     if (existingTimer) {
-      const updatedTimer = { ...existingTimer, ...data }
+      const updatedTimer = { ...existingTimer, ...data, updated_at: new Date().toISOString() }
       await offlineStorage.saveTimer(updatedTimer)
     }
 
     // In local mode, just return the updated timer
     if (isLocalMode()) {
+      if (isCloudMode()) {
+        await offlineStorage.addToSyncQueue({ type: 'update', timerId: id })
+        oneDriveSync.markDirty()
+      }
       return await offlineStorage.getTimer(id)
     }
 
@@ -686,11 +696,16 @@ export const api = {
     const existingTimer = await offlineStorage.getTimer(id)
     if (existingTimer) {
       existingTimer.end_time = endTime
+      existingTimer.updated_at = new Date().toISOString()
       await offlineStorage.saveTimer(existingTimer)
     }
 
     // In local mode, just return the updated timer
     if (isLocalMode()) {
+      if (isCloudMode()) {
+        await offlineStorage.addToSyncQueue({ type: 'stop', timerId: id })
+        oneDriveSync.markDirty()
+      }
       return existingTimer
     }
 
@@ -719,6 +734,11 @@ export const api = {
 
     // In local mode, we're done
     if (isLocalMode()) {
+      if (isCloudMode()) {
+        await offlineStorage.addDeletedTimer(id, new Date().toISOString())
+        await offlineStorage.addToSyncQueue({ type: 'delete', timerId: id })
+        oneDriveSync.markDirty()
+      }
       return null
     }
 
@@ -835,9 +855,15 @@ export const api = {
 
   // Local mode helpers
   isLocalMode,
+  isCloudMode,
   setLocalMode,
+  setCloudMode,
   getDeviceId,
   
   // Logout (clears all local data)
   logout
+}
+
+if (isCloudMode()) {
+  oneDriveSync.startAutoSync()
 }

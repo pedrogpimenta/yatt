@@ -22,6 +22,7 @@ On first launch, open Settings and set the API base URL (for example, `http://10
 
 - Native Material 3 UI
 - Login, register, and local mode
+- OneDrive sync (end-to-end encrypted, app folder)
 - Start/stop timers with tags
 - Edit timers and add past entries
 - List and calendar views
@@ -30,3 +31,23 @@ On first launch, open Settings and set the API base URL (for example, `http://10
 - Device-to-device sync (online and offline export)
 - CSV export
 - Running timer notification
+
+## OneDrive Sync (MVP)
+
+The Android app can connect to OneDrive using the device code flow.
+
+### Configure client ID
+
+Set your Azure App Registration client ID in:
+
+`android-app/app/src/main/res/values/strings.xml`
+
+```xml
+<string name="onedrive_client_id">YOUR_CLIENT_ID</string>
+```
+
+Permissions required:
+
+- `Files.ReadWrite.AppFolder`
+- `User.Read`
+- `offline_access`

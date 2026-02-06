@@ -59,6 +59,8 @@ fun SettingsScreen(
     )
     val token by settingsViewModel.authTokenFlow.collectAsState(initial = null)
     val localMode by settingsViewModel.localModeFlow.collectAsState(initial = false)
+    val cloudProvider by settingsViewModel.cloudProviderFlow.collectAsState(initial = null)
+    val cloudLastSyncAt by settingsViewModel.cloudLastSyncAtFlow.collectAsState(initial = null)
     val state by settingsViewModel.state.collectAsState()
 
     var showToken by remember { mutableStateOf(false) }
@@ -76,7 +78,7 @@ fun SettingsScreen(
     if (showLogoutConfirm) {
         AlertDialog(
             onDismissRequest = { showLogoutConfirm = false },
-            title = { Text("Exit local mode") },
+            title = { Text(if (cloudProvider != null) "Disconnect OneDrive" else "Exit local mode") },
             text = {
                 Text("All data stored on this device will be deleted.")
             },
@@ -198,11 +200,25 @@ fun SettingsScreen(
 
             Divider()
 
-            if (localMode) {
+            if (localMode && cloudProvider == null) {
                 Text("Local mode", style = MaterialTheme.typography.titleMedium)
                 Text("Data is stored only on this device.")
                 Button(onClick = onOpenDeviceSync) {
                     Text("Sync with another device")
+                }
+            }
+
+            if (cloudProvider != null) {
+                Text("OneDrive sync", style = MaterialTheme.typography.titleMedium)
+                Text("Your data is encrypted and stored in your OneDrive app folder.")
+                Text(
+                    "Last sync: ${cloudLastSyncAt ?: "Never"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(onClick = { settingsViewModel.syncOneDriveNow() }) {
+                    Text("Sync now")
                 }
             }
 
@@ -330,7 +346,7 @@ fun SettingsScreen(
 
             Button(
                 onClick = {
-                    if (localMode) {
+                    if (localMode || cloudProvider != null) {
                         showLogoutConfirm = true
                     } else {
                         settingsViewModel.logout(clearLocalData = true)
@@ -339,7 +355,13 @@ fun SettingsScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (localMode) "Exit local mode" else "Logout")
+                Text(
+                    when {
+                        cloudProvider != null -> "Disconnect OneDrive"
+                        localMode -> "Exit local mode"
+                        else -> "Logout"
+                    }
+                )
             }
         }
     }

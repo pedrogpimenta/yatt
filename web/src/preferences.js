@@ -1,6 +1,7 @@
 import { reactive, watch } from 'vue'
 
 const STORAGE_KEY = 'yatt_preferences'
+const UPDATED_AT_KEY = 'yatt_preferences_updated_at'
 
 const defaults = {
   dateFormat: 'dd/mm/yyyy', // 'dd/mm/yyyy' or 'mm/dd/yyyy'
@@ -33,9 +34,39 @@ function savePreferences(prefs) {
 
 export const preferences = reactive(loadPreferences())
 
+let suppressUpdatedAt = false
+
+export function getPreferencesUpdatedAt() {
+  return localStorage.getItem(UPDATED_AT_KEY)
+}
+
+export function setPreferencesUpdatedAt(value) {
+  if (!value) {
+    localStorage.removeItem(UPDATED_AT_KEY)
+    return
+  }
+  localStorage.setItem(UPDATED_AT_KEY, value)
+}
+
+export function applyRemotePreferences(newPrefs, updatedAt) {
+  suppressUpdatedAt = true
+  Object.keys(preferences).forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(newPrefs, key)) {
+      preferences[key] = newPrefs[key]
+    }
+  })
+  if (updatedAt) {
+    setPreferencesUpdatedAt(updatedAt)
+  }
+  suppressUpdatedAt = false
+}
+
 // Auto-save when preferences change
 watch(preferences, (newPrefs) => {
   savePreferences(newPrefs)
+  if (!suppressUpdatedAt) {
+    setPreferencesUpdatedAt(new Date().toISOString())
+  }
 }, { deep: true })
 
 // Day boundary helpers for time tracking
