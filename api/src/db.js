@@ -74,8 +74,6 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_timers_user_id ON timers(user_id);
   CREATE INDEX IF NOT EXISTS idx_timers_start_time ON timers(start_time);
   CREATE INDEX IF NOT EXISTS idx_daily_goals_user_id ON daily_goals(user_id);
-  CREATE INDEX IF NOT EXISTS idx_users_email_confirmation_token ON users(email_confirmation_token);
-  CREATE INDEX IF NOT EXISTS idx_users_password_reset_token ON users(password_reset_token);
 `);
 
 // Ensure new columns exist for existing databases
