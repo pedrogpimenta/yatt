@@ -7,17 +7,10 @@ import org.kde.kcmutils as KCM
 KCM.SimpleKCM {
     id: configRoot
 
-    property alias cfg_apiUrl: apiUrlField.text
     property alias cfg_token: tokenField.text
 
     Kirigami.FormLayout {
         anchors.fill: parent
-
-        QQC2.TextField {
-            id: apiUrlField
-            Kirigami.FormData.label: i18n("API URL:")
-            placeholderText: "http://localhost:3000"
-        }
 
         QQC2.TextField {
             id: tokenField

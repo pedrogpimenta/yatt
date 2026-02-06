@@ -126,12 +126,12 @@ PlasmaExtras.Representation {
                 icon.name: "view-refresh"
                 onClicked: {
                     root.fetchPreferences()
-                    root.fetchTimers()
+                    root.fetchTimers(true)   // force – always fetch even if loading was stuck
                     root.fetchTags()
                     root.fetchProjects()
                     root.fetchClients()
-                    if (root.isOnline && root.pendingSyncCount > 0) {
-                        root.syncWithServer()
+                    if (root.pendingSyncCount > 0) {
+                        root.syncWithServer(true)   // force – try sync even if widget thinks offline
                     }
                 }
                 PlasmaComponents.ToolTip { text: root.pendingSyncCount > 0 ? "Refresh & Sync" : "Refresh" }
@@ -139,7 +139,7 @@ PlasmaExtras.Representation {
 
             PlasmaComponents.ToolButton {
                 icon.name: "internet-web-browser"
-                onClicked: Qt.openUrlExternally("http://localhost:5173")
+                onClicked: Qt.openUrlExternally("https://time.command.pimenta.pt")
                 PlasmaComponents.ToolTip { text: "Open Web App" }
             }
 

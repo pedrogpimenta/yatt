@@ -5,10 +5,6 @@
                           http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
     <kcfgfile name=""/>
     <group name="General">
-        <entry name="apiUrl" type="String">
-            <label>API URL</label>
-            <default>http://localhost:3000</default>
-        </entry>
         <entry name="token" type="String">
             <label>Authentication Token</label>
             <default></default>

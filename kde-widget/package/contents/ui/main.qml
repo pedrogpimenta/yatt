@@ -8,14 +8,7 @@ import org.kde.plasma.core as PlasmaCore
 PlasmoidItem {
     id: root
 
-    property string apiUrl: {
-        var url = Plasmoid.configuration.apiUrl || "http://localhost:3000"
-        // Remove trailing slash to avoid double slashes in API calls
-        while (url.endsWith("/")) {
-            url = url.slice(0, -1)
-        }
-        return url
-    }
+    property string apiUrl: "https://time-server.command.pimenta.pt"
     property string token: Plasmoid.configuration.token || ""
     
     property var currentTimer: null
@@ -306,13 +299,15 @@ PlasmoidItem {
         pendingSyncCount = 0
     }
     
-    // Update pending sync count
+    // Update pending sync count (ensure int so UI binding updates)
     function updatePendingSyncCount() {
         var db = getDatabase()
+        var count = 0
         db.readTransaction(function(tx) {
             var rs = tx.executeSql('SELECT COUNT(*) as count FROM sync_queue')
-            pendingSyncCount = rs.rows.item(0).count
+            count = parseInt(String(rs.rows.item(0).count), 10) || 0
         })
+        pendingSyncCount = count
     }
     
     // Get unique tags from local timers
@@ -438,16 +433,20 @@ PlasmoidItem {
         }
     }
     
-    // Sync pending operations with server
-    function syncWithServer() {
-        if (isSyncing || !isOnline) return
-        
+    // Sync pending operations with server. Pass true to force (e.g. when user clicks refresh) even if isOnline is false.
+    function syncWithServer(force) {
+        if (isSyncing) return
+        if (!force && !isOnline) {
+            console.log("YATT: Sync skipped (offline). Click Refresh to force sync.")
+            return
+        }
         var queue = getSyncQueue()
-        if (queue.length === 0) return
-        
-        console.log("YATT: Starting sync, " + queue.length + " operations pending")
+        if (queue.length === 0) {
+            updatePendingSyncCount()
+            return
+        }
+        console.log("YATT: Starting sync, " + queue.length + " operations pending" + (force ? " (forced)" : ""))
         isSyncing = true
-        
         processNextSyncItem(queue, 0)
     }
     
@@ -522,8 +521,9 @@ PlasmoidItem {
     }
     
     function syncUpdateTimer(item, queue, index) {
-        // Skip if it's still a local ID (create not synced yet)
+        // Orphaned update for a timer that was never created on server – remove so count doesn't stay stuck
         if (isLocalId(item.timer_id)) {
+            removeSyncQueueItem(item.id)
             processNextSyncItem(queue, index + 1)
             return
         }
@@ -559,8 +559,9 @@ PlasmoidItem {
     }
     
     function syncStopTimer(item, queue, index) {
-        // Skip if it's still a local ID (create not synced yet)
+        // Orphaned stop for a timer that was never created on server – remove so count doesn't stay stuck
         if (isLocalId(item.timer_id)) {
+            removeSyncQueueItem(item.id)
             processNextSyncItem(queue, index + 1)
             return
         }
@@ -642,29 +643,36 @@ PlasmoidItem {
     // Check if server is reachable
     function checkOnlineStatus() {
         if (!token) return
-        
+        var checkUrl = apiUrl + "/timers/tags"
+        console.log("YATT: checkOnlineStatus", checkUrl)
         var xhr = new XMLHttpRequest()
         xhr.timeout = 5000
-        xhr.open("GET", apiUrl + "/timers/tags")
+        xhr.open("GET", checkUrl)
         xhr.setRequestHeader("Authorization", "Bearer " + token)
         
         xhr.onreadystatechange = function() {
             if (xhr.readyState === XMLHttpRequest.DONE) {
                 var wasOffline = !isOnline
                 isOnline = (xhr.status >= 200 && xhr.status < 300)
-                
+                console.log("YATT: checkOnlineStatus result status=" + xhr.status + " isOnline=" + isOnline)
                 if (isOnline && wasOffline) {
                     console.log("YATT: Back online, starting sync")
                     lastApiError = ""
                     syncWithServer()
                 } else if (!isOnline) {
-                    console.log("YATT: Offline mode active")
+                    console.log("YATT: Offline – click Refresh to retry, or run plasmoidviewer to debug")
                 }
             }
         }
         
         xhr.onerror = function() {
             isOnline = false
+            console.log("YATT: checkOnlineStatus error (network)")
+        }
+        
+        xhr.ontimeout = function() {
+            isOnline = false
+            console.log("YATT: checkOnlineStatus timeout")
         }
         
         xhr.send()
@@ -695,6 +703,19 @@ PlasmoidItem {
                 todayTotal = baseToday + currentElapsed
                 weekTotal = baseWeek + currentElapsed
                 if (dailyGoalEnabled) updateGoalRemaining()
+            }
+        }
+    }
+
+    // If loading is stuck (no callback), reset after 15s so Refresh works again
+    Timer {
+        id: loadingSafetyTimer
+        interval: 15000
+        repeat: false
+        onTriggered: {
+            if (root.loading) {
+                root.loading = false
+                console.log("YATT: Loading safety timeout – request may have hung. Try Refresh.")
             }
         }
     }
@@ -973,17 +994,28 @@ PlasmoidItem {
         }
     }
 
-    function fetchTimers() {
+    function fetchTimers(forceRefresh) {
+        if (!forceRefresh && loading) {
+            console.log("YATT: fetchTimers skipped (already loading). Click Refresh to force.")
+            return
+        }
         loading = true
+        loadingSafetyTimer.restart()
+        console.log("YATT: fetchTimers started", forceRefresh ? "(forced)" : "")
         apiRequest("/timers", "GET", null, function(timers) {
             loading = false
-            if (!timers || !Array.isArray(timers)) return
-
+            if (!timers || !Array.isArray(timers)) {
+                console.log("YATT: fetchTimers got invalid response, using local")
+                var localTimers = getTimersFromLocal()
+                processTimersData(localTimers)
+                return
+            }
+            console.log("YATT: fetchTimers success,", timers.length, "timers")
             saveTimersToLocal(timers)
             processTimersData(timers)
         }, function() {
-            // Offline fallback - load from local storage
             loading = false
+            console.log("YATT: fetchTimers failed, using local storage")
             var localTimers = getTimersFromLocal()
             processTimersData(localTimers)
         })
