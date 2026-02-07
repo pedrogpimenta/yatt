@@ -7,20 +7,30 @@ const emit = defineEmits(['login'])
 const email = ref('')
 const password = ref('')
 const error = ref('')
+const notice = ref('')
 const isRegistering = ref(false)
 const loading = ref(false)
 
 async function handleSubmit() {
   error.value = ''
+  notice.value = ''
   loading.value = true
 
   try {
     const action = isRegistering.value ? api.register : api.login
     const data = await action(email.value, password.value)
+    if (isRegistering.value && (!data.token || data.emailConfirmationRequired)) {
+      notice.value = 'Please confirm your email'
+      return
+    }
     api.setToken(data.token)
     emit('login')
   } catch (err) {
-    error.value = err.message
+    if (err.message === 'Email not confirmed') {
+      notice.value = 'Please confirm your email'
+    } else {
+      error.value = err.message
+    }
   } finally {
     loading.value = false
   }
@@ -61,6 +71,7 @@ function useWithoutAccount() {
       </div>
 
       <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="notice" class="notice">{{ notice }}</p>
 
       <button type="submit" class="submit-btn" :disabled="loading">
         {{ loading ? 'Please wait...' : (isRegistering ? 'Register' : 'Login') }}
@@ -152,6 +163,12 @@ input::placeholder {
 
 .error {
   color: var(--danger-color);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.notice {
+  color: var(--success-color);
   font-size: 0.875rem;
   text-align: center;
 }

@@ -8,6 +8,17 @@ services:
     environment:
       - JWT_SECRET=${JWT_SECRET:-please-change-this-secret}
       - PORT=3000
+      - APP_NAME=${APP_NAME:-YATT}
+      - PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL:-http://localhost:3000}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_SECURE=${SMTP_SECURE}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_FROM=${SMTP_FROM}
+      - EMAIL_CONFIRMATION_TTL_HOURS=${EMAIL_CONFIRMATION_TTL_HOURS}
+      - PASSWORD_RESET_TTL_HOURS=${PASSWORD_RESET_TTL_HOURS}
+      - REQUIRE_EMAIL_CONFIRMATION=${REQUIRE_EMAIL_CONFIRMATION}
     restart: unless-stopped
 
   web:

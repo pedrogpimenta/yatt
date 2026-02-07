@@ -59,7 +59,7 @@ Register via the web interface or directly via API:
 ```bash
 curl -X POST http://localhost:3000/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"username": "your_username", "password": "your_password"}'
+  -d '{"email": "you@example.com", "password": "your_password"}'
 ```
 
 ## Production Deployment
@@ -206,7 +206,7 @@ The API uses JWT tokens. To get a token:
 # Login
 curl -X POST http://localhost:3000/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username": "your_username", "password": "your_password"}'
+  -d '{"email": "you@example.com", "password": "your_password"}'
 ```
 
 Response:
@@ -214,7 +214,7 @@ Response:
 ```json
 {
   "token": "eyJhbGciOiJIUzI1NiIs...",
-  "user": { "id": 1, "username": "your_username" }
+  "user": { "id": 1, "email": "you@example.com" }
 }
 ```
 
@@ -231,6 +231,10 @@ curl http://localhost:3000/timers \
 |--------|----------|-------------|
 | POST | /auth/register | Register new user |
 | POST | /auth/login | Login and get token |
+| GET | /auth/confirm-email | Confirm email address |
+| POST | /auth/request-password-reset | Send password reset email |
+| GET | /auth/reset-password | Reset password form |
+| POST | /auth/reset-password | Reset password with token |
 | GET | /timers | Get all timers |
 | POST | /timers | Create new timer |
 | GET | /timers/:id | Get single timer |
@@ -264,6 +268,33 @@ ws.onmessage = (event) => {
 | JWT_SECRET | (required) | Secret key for JWT signing |
 | PORT | 3000 | API server port |
 | DB_PATH | ./data/yatt.db | SQLite database path |
+| APP_NAME | YATT | App name used in email templates |
+| PUBLIC_API_BASE_URL | http://localhost:3000 | Base URL for email links |
+| SMTP_HOST | (required for email) | SMTP server host |
+| SMTP_PORT | 465 | SMTP server port |
+| SMTP_SECURE | true | Use TLS for SMTP |
+| SMTP_USER | (required for email) | SMTP username |
+| SMTP_PASS | (required for email) | SMTP password |
+| SMTP_FROM | SMTP_USER | From address for emails |
+| EMAIL_CONFIRMATION_TTL_HOURS | 48 | Confirmation token TTL (hours) |
+| PASSWORD_RESET_TTL_HOURS | 2 | Reset token TTL (hours) |
+| REQUIRE_EMAIL_CONFIRMATION | false | Block login until email confirmed |
+
+## Email Confirmation and Password Reset
+
+When SMTP is configured, the API sends confirmation and reset emails automatically.
+
+```bash
+# Request a password reset email
+curl -X POST http://localhost:3000/auth/request-password-reset \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com"}'
+
+# Reset password with a token from the email
+curl -X POST http://localhost:3000/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{"token": "TOKEN_FROM_EMAIL", "newPassword": "new-secret"}'
+```
 
 ## Troubleshooting
 
