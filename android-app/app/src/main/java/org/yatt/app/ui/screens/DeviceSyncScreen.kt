@@ -39,11 +39,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.Bitmap
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
-import org.yatt.app.data.ONE_DRIVE_SYNC_FILE_NAME
+import org.yatt.app.data.SYNC_FILE_NAME
 import org.yatt.app.viewmodel.DeviceSyncViewModel
 import androidx.compose.material3.ExperimentalMaterial3Api
 
-private enum class SyncType { ONLINE, OFFLINE, ONEDRIVE }
+private enum class SyncType { ONLINE, OFFLINE, CLOUD }
 private enum class SyncMode { CHOOSE, SHARE, JOIN, EXPORT, IMPORT }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,7 +59,7 @@ fun DeviceSyncScreen(
     var importData by remember { mutableStateOf("") }
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
-    val oneDrivePicker = rememberLauncherForActivityResult(
+    val cloudFolderPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri != null) {
@@ -71,9 +71,9 @@ fun DeviceSyncScreen(
                 false
             }
             if (persisted) {
-                deviceSyncViewModel.setOneDriveFolder(uri)
+                deviceSyncViewModel.setCloudFolder(uri)
             } else {
-                deviceSyncViewModel.setError("Unable to access selected OneDrive folder.")
+                deviceSyncViewModel.setError("Unable to access selected cloud folder.")
             }
         }
     }
@@ -109,8 +109,8 @@ fun DeviceSyncScreen(
                     Button(onClick = { syncType = SyncType.OFFLINE }) {
                         Text("Offline")
                     }
-                    Button(onClick = { syncType = SyncType.ONEDRIVE }) {
-                        Text("OneDrive")
+                    Button(onClick = { syncType = SyncType.CLOUD }) {
+                        Text("Cloud folder")
                     }
                 }
 
@@ -138,25 +138,26 @@ fun DeviceSyncScreen(
                             Text("Import data")
                         }
                     } else {
-                        val hasFolder = !uiState.oneDriveFolderUri.isNullOrBlank()
-                        Text("Sync using a OneDrive folder on this device.")
-                        Text("Your OneDrive app will keep this folder in sync.")
-                        Text("Sync file: $ONE_DRIVE_SYNC_FILE_NAME")
-                        Text(if (hasFolder) "OneDrive folder selected." else "No OneDrive folder selected.")
-                        Button(onClick = { oneDrivePicker.launch(null) }) {
-                            Text(if (hasFolder) "Change OneDrive folder" else "Choose OneDrive folder")
+                        val hasFolder = !uiState.cloudFolderUri.isNullOrBlank()
+                        Text("Sync using a cloud folder on this device.")
+                        Text("Works with Google Drive, Dropbox, OneDrive, and other providers.")
+                        Text("Your drive app will keep this folder in sync.")
+                        Text("Sync file: $SYNC_FILE_NAME")
+                        Text(if (hasFolder) "Cloud folder selected." else "No cloud folder selected.")
+                        Button(onClick = { cloudFolderPicker.launch(null) }) {
+                            Text(if (hasFolder) "Change cloud folder" else "Choose cloud folder")
                         }
                         Button(
-                            onClick = { deviceSyncViewModel.exportToOneDrive() },
+                            onClick = { deviceSyncViewModel.exportToCloudFolder() },
                             enabled = hasFolder && !uiState.loading
                         ) {
-                            Text("Export to OneDrive")
+                            Text("Export to cloud folder")
                         }
                         Button(
-                            onClick = { deviceSyncViewModel.importFromOneDrive() },
+                            onClick = { deviceSyncViewModel.importFromCloudFolder() },
                             enabled = hasFolder && !uiState.loading
                         ) {
-                            Text("Import from OneDrive")
+                            Text("Import from cloud folder")
                         }
                         if (uiState.loading) {
                             Text("Working...")

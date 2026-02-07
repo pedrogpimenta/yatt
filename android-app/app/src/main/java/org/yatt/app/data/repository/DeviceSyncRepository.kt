@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import org.yatt.app.data.ONE_DRIVE_SYNC_FILE_NAME
+import org.yatt.app.data.SYNC_FILE_NAME
 import org.yatt.app.data.SettingsStore
 import org.yatt.app.data.local.ProjectDao
 import org.yatt.app.data.local.ProjectEntity
@@ -35,7 +35,7 @@ class DeviceSyncRepository(
 ) {
     private val contentResolver = context.contentResolver
 
-    val oneDriveFolderUriFlow: Flow<String?> = settingsStore.oneDriveFolderUriFlow
+    val cloudFolderUriFlow: Flow<String?> = settingsStore.cloudFolderUriFlow
 
     suspend fun createSession(): SyncSession = withContext(Dispatchers.IO) {
         val deviceId = settingsStore.getOrCreateDeviceId()
@@ -107,30 +107,30 @@ class DeviceSyncRepository(
         return@withContext parseImportPayload(decoded)
     }
 
-    suspend fun setOneDriveFolderUri(uri: String?) {
-        settingsStore.setOneDriveFolderUri(uri)
+    suspend fun setCloudFolderUri(uri: String?) {
+        settingsStore.setCloudFolderUri(uri)
     }
 
-    suspend fun exportToOneDrive(): String = withContext(Dispatchers.IO) {
-        val folder = requireOneDriveFolder()
-        val file = folder.findFile(ONE_DRIVE_SYNC_FILE_NAME)
-            ?: folder.createFile("application/json", ONE_DRIVE_SYNC_FILE_NAME)
-            ?: throw IllegalStateException("Unable to create OneDrive sync file.")
+    suspend fun exportToCloudFolder(): String = withContext(Dispatchers.IO) {
+        val folder = requireCloudFolder()
+        val file = folder.findFile(SYNC_FILE_NAME)
+            ?: folder.createFile("application/json", SYNC_FILE_NAME)
+            ?: throw IllegalStateException("Unable to create sync file in the cloud folder.")
         val payload = buildExportPayload().toString()
         val stream = contentResolver.openOutputStream(file.uri, "w")
-            ?: throw IllegalStateException("Unable to write OneDrive sync file.")
+            ?: throw IllegalStateException("Unable to write sync file in the cloud folder.")
         stream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
-        return@withContext file.name ?: ONE_DRIVE_SYNC_FILE_NAME
+        return@withContext file.name ?: SYNC_FILE_NAME
     }
 
-    suspend fun importFromOneDrive(): SyncImportResult = withContext(Dispatchers.IO) {
-        val folder = requireOneDriveFolder()
-        val file = folder.findFile(ONE_DRIVE_SYNC_FILE_NAME)
-            ?: throw IllegalStateException("OneDrive sync file not found. Export from another device first.")
+    suspend fun importFromCloudFolder(): SyncImportResult = withContext(Dispatchers.IO) {
+        val folder = requireCloudFolder()
+        val file = folder.findFile(SYNC_FILE_NAME)
+            ?: throw IllegalStateException("Sync file not found. Export from another device first.")
         val content = contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { it.readText() }
-            ?: throw IllegalStateException("Unable to read OneDrive sync file.")
+            ?: throw IllegalStateException("Unable to read sync file from the cloud folder.")
         if (content.isBlank()) {
-            throw IllegalStateException("OneDrive sync file is empty.")
+            throw IllegalStateException("Sync file is empty.")
         }
         val decoded = decodeImportPayload(content)
         return@withContext parseImportPayload(decoded)
@@ -266,16 +266,16 @@ class DeviceSyncRepository(
         return "local_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}"
     }
 
-    private suspend fun requireOneDriveFolder(): DocumentFile {
-        val uriString = settingsStore.oneDriveFolderUriFlow.first()
+    private suspend fun requireCloudFolder(): DocumentFile {
+        val uriString = settingsStore.cloudFolderUriFlow.first()
         if (uriString.isNullOrBlank()) {
-            throw IllegalStateException("Select a OneDrive folder first.")
+            throw IllegalStateException("Select a cloud folder first.")
         }
         val uri = Uri.parse(uriString)
         val folder = DocumentFile.fromTreeUri(context, uri)
-            ?: throw IllegalStateException("Unable to access OneDrive folder.")
+            ?: throw IllegalStateException("Unable to access cloud folder.")
         if (!folder.isDirectory) {
-            throw IllegalStateException("Selected OneDrive location is not a folder.")
+            throw IllegalStateException("Selected cloud location is not a folder.")
         }
         return folder
     }

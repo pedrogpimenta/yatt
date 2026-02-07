@@ -19,7 +19,7 @@ data class DeviceSyncUiState(
     val polling: Boolean = false,
     val error: String? = null,
     val success: String? = null,
-    val oneDriveFolderUri: String? = null
+    val cloudFolderUri: String? = null
 )
 
 class DeviceSyncViewModel(
@@ -36,8 +36,8 @@ class DeviceSyncViewModel(
 
     init {
         viewModelScope.launch {
-            deviceSyncRepository.oneDriveFolderUriFlow.collect { uri ->
-                state.value = state.value.copy(oneDriveFolderUri = uri)
+            deviceSyncRepository.cloudFolderUriFlow.collect { uri ->
+                state.value = state.value.copy(cloudFolderUri = uri)
             }
         }
     }
@@ -96,23 +96,23 @@ class DeviceSyncViewModel(
         }
     }
 
-    fun setOneDriveFolder(uri: Uri) {
+    fun setCloudFolder(uri: Uri) {
         viewModelScope.launch {
             state.value = state.value.copy(loading = true, error = null, success = null)
             try {
-                deviceSyncRepository.setOneDriveFolderUri(uri.toString())
-                state.value = state.value.copy(loading = false, success = "OneDrive folder saved.")
+                deviceSyncRepository.setCloudFolderUri(uri.toString())
+                state.value = state.value.copy(loading = false, success = "Cloud folder saved.")
             } catch (ex: Exception) {
                 state.value = state.value.copy(loading = false, error = ex.message)
             }
         }
     }
 
-    fun exportToOneDrive() {
+    fun exportToCloudFolder() {
         viewModelScope.launch {
             state.value = state.value.copy(loading = true, error = null, success = null)
             try {
-                val fileName = deviceSyncRepository.exportToOneDrive()
+                val fileName = deviceSyncRepository.exportToCloudFolder()
                 state.value = state.value.copy(loading = false, success = "Exported to $fileName")
             } catch (ex: Exception) {
                 state.value = state.value.copy(loading = false, error = ex.message)
@@ -120,11 +120,11 @@ class DeviceSyncViewModel(
         }
     }
 
-    fun importFromOneDrive() {
+    fun importFromCloudFolder() {
         viewModelScope.launch {
             state.value = state.value.copy(loading = true, error = null, success = null)
             try {
-                val result = deviceSyncRepository.importFromOneDrive()
+                val result = deviceSyncRepository.importFromCloudFolder()
                 deviceSyncRepository.completeImport(result.timers, result.projects, result.preferences)
                 state.value = state.value.copy(loading = false, success = "Import complete")
             } catch (ex: Exception) {
