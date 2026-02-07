@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.yatt.app.data.local.ProjectEntity
 import org.yatt.app.data.repository.DeviceSyncRepository
+import android.net.Uri
 
 data class DeviceSyncUiState(
     val syncCode: String = "",
@@ -17,7 +18,8 @@ data class DeviceSyncUiState(
     val loading: Boolean = false,
     val polling: Boolean = false,
     val error: String? = null,
-    val success: String? = null
+    val success: String? = null,
+    val oneDriveFolderUri: String? = null
 )
 
 class DeviceSyncViewModel(
@@ -31,6 +33,14 @@ class DeviceSyncViewModel(
     )
 
     private var pollingJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            deviceSyncRepository.oneDriveFolderUriFlow.collect { uri ->
+                state.value = state.value.copy(oneDriveFolderUri = uri)
+            }
+        }
+    }
 
     fun startSharing() {
         viewModelScope.launch {
@@ -84,6 +94,47 @@ class DeviceSyncViewModel(
                 state.value = state.value.copy(loading = false, error = ex.message)
             }
         }
+    }
+
+    fun setOneDriveFolder(uri: Uri) {
+        viewModelScope.launch {
+            state.value = state.value.copy(loading = true, error = null, success = null)
+            try {
+                deviceSyncRepository.setOneDriveFolderUri(uri.toString())
+                state.value = state.value.copy(loading = false, success = "OneDrive folder saved.")
+            } catch (ex: Exception) {
+                state.value = state.value.copy(loading = false, error = ex.message)
+            }
+        }
+    }
+
+    fun exportToOneDrive() {
+        viewModelScope.launch {
+            state.value = state.value.copy(loading = true, error = null, success = null)
+            try {
+                val fileName = deviceSyncRepository.exportToOneDrive()
+                state.value = state.value.copy(loading = false, success = "Exported to $fileName")
+            } catch (ex: Exception) {
+                state.value = state.value.copy(loading = false, error = ex.message)
+            }
+        }
+    }
+
+    fun importFromOneDrive() {
+        viewModelScope.launch {
+            state.value = state.value.copy(loading = true, error = null, success = null)
+            try {
+                val result = deviceSyncRepository.importFromOneDrive()
+                deviceSyncRepository.completeImport(result.timers, result.projects, result.preferences)
+                state.value = state.value.copy(loading = false, success = "Import complete")
+            } catch (ex: Exception) {
+                state.value = state.value.copy(loading = false, error = ex.message)
+            }
+        }
+    }
+
+    fun setError(message: String) {
+        state.value = state.value.copy(loading = false, error = message, success = null)
     }
 
     fun reset() {

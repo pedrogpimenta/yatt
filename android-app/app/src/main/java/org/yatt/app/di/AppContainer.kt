@@ -33,6 +33,7 @@ class AppContainer(context: Context) {
     val projectDao = database.projectDao()
     val projectsRepository = ProjectsRepository(settingsStore, apiService, projectDao)
     val deviceSyncRepository = DeviceSyncRepository(
+        appContext,
         apiService,
         database.timerDao(),
         projectDao,
