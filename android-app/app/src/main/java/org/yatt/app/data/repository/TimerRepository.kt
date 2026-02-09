@@ -67,10 +67,12 @@ class TimerRepository(
                 description = description,
                 projectId = projectId,
                 projectName = projectName,
-                clientName = clientName
+                clientName = clientName,
+                updatedAt = Instant.now().toString()
             )
             timerDao.saveTimer(local)
             notifyRunning(local)
+            markCloudDirty()
             return@withContext local
         }
 
@@ -89,7 +91,8 @@ class TimerRepository(
                     description = description,
                     projectId = projectId,
                     projectName = projectName,
-                    clientName = clientName
+                    clientName = clientName,
+                    updatedAt = Instant.now().toString()
                 )
                 timerDao.saveTimer(local)
                 enqueueSync(
@@ -99,6 +102,7 @@ class TimerRepository(
                     data = jsonData(startTime, endTime, tag, description, projectId)
                 )
                 notifyRunning(local)
+                markCloudDirty()
                 local
             }
         }
@@ -111,7 +115,8 @@ class TimerRepository(
             description = description,
             projectId = projectId,
             projectName = projectName,
-            clientName = clientName
+            clientName = clientName,
+            updatedAt = Instant.now().toString()
         )
         timerDao.saveTimer(local)
         enqueueSync(
@@ -121,6 +126,7 @@ class TimerRepository(
             data = jsonData(startTime, endTime, tag, description, projectId)
         )
         notifyRunning(local)
+        markCloudDirty()
         return@withContext local
     }
 
@@ -135,7 +141,8 @@ class TimerRepository(
                     description = if (description != null) description else existing.description,
                     projectId = projectId ?: existing.projectId,
                     projectName = existing.projectName,
-                    clientName = existing.clientName
+                    clientName = existing.clientName,
+                    updatedAt = Instant.now().toString()
                 )
                 timerDao.saveTimer(updated)
                 if (updated.endTime == null) {
@@ -149,6 +156,7 @@ class TimerRepository(
             }
 
             if (isLocalMode()) {
+                markCloudDirty()
                 return@withContext timerDao.getTimer(id)
             }
 
@@ -189,12 +197,13 @@ class TimerRepository(
         val endTime = Instant.now().toString()
         val existing = timerDao.getTimer(id)
         if (existing != null) {
-            val updated = existing.copy(endTime = endTime)
+            val updated = existing.copy(endTime = endTime, updatedAt = Instant.now().toString())
             timerDao.saveTimer(updated)
             notificationController.stopTimer()
         }
 
         if (isLocalMode()) {
+            markCloudDirty()
             return@withContext timerDao.getTimer(id)
         }
 
@@ -230,7 +239,13 @@ class TimerRepository(
         if (existing?.endTime == null) {
             notificationController.stopTimer()
         }
-        if (isLocalMode()) return@withContext
+        if (isLocalMode()) {
+            if (settingsStore.cloudProviderFlow.first() != null) {
+                settingsStore.addDeletedTimer(id, Instant.now().toString())
+                markCloudDirty()
+            }
+            return@withContext
+        }
 
         if (isOnline() && !isLocalId(id)) {
             try {
@@ -329,7 +344,11 @@ class TimerRepository(
 
     suspend fun clearAllLocalData() = withContext(Dispatchers.IO) {
         timerDao.clearTimers()
+        projectDao.clear()
         syncQueueDao.clear()
+        settingsStore.setDeletedTimers(emptyList())
+        settingsStore.setDeletedProjects(emptyList())
+        settingsStore.setCloudDirty(false)
     }
 
     suspend fun exportCsv(): String = withContext(Dispatchers.IO) {
@@ -409,6 +428,13 @@ class TimerRepository(
     private suspend fun isLocalMode(): Boolean = settingsStore.localModeFlow.first()
 
     private suspend fun isOnline(): Boolean = connectivityObserver.isOnline.first()
+
+    private suspend fun markCloudDirty() {
+        val cloudProvider = settingsStore.cloudProviderFlow.first()
+        if (!cloudProvider.isNullOrBlank()) {
+            settingsStore.setCloudDirty(true)
+        }
+    }
 
     private fun resolveId(id: String?, mapping: Map<String, String>): String? {
         if (id == null) return null

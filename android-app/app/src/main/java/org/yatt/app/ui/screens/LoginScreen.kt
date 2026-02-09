@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,7 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import org.yatt.app.viewmodel.AuthUiState
+import android.content.Intent
+import android.net.Uri
 
 @Composable
 fun LoginScreen(
@@ -31,11 +35,16 @@ fun LoginScreen(
     onLogin: (String, String) -> Unit,
     onRegister: (String, String) -> Unit,
     onLocalMode: () -> Unit,
+    onConnectOneDrive: (String) -> Unit,
     onDismissError: () -> Unit
 ) {
     var email by remember { mutableStateOf(TextFieldValue("")) }
     var password by remember { mutableStateOf(TextFieldValue("")) }
     var isRegistering by remember { mutableStateOf(false) }
+    var showOneDrive by remember { mutableStateOf(false) }
+    var oneDrivePassphrase by remember { mutableStateOf(TextFieldValue("")) }
+    var oneDriveConfirm by remember { mutableStateOf(TextFieldValue("")) }
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -112,6 +121,68 @@ fun LoginScreen(
 
         Button(onClick = onLocalMode) {
             Text("Use without account")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedButton(onClick = { showOneDrive = !showOneDrive }) {
+            Text(if (showOneDrive) "Hide OneDrive setup" else "Connect OneDrive")
+        }
+
+        if (showOneDrive) {
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedTextField(
+                value = oneDrivePassphrase,
+                onValueChange = {
+                    oneDrivePassphrase = it
+                    onDismissError()
+                },
+                label = { Text("Encryption passphrase") },
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = oneDriveConfirm,
+                onValueChange = {
+                    oneDriveConfirm = it
+                    onDismissError()
+                },
+                label = { Text("Confirm passphrase") },
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = {
+                    if (oneDrivePassphrase.text == oneDriveConfirm.text) {
+                        onConnectOneDrive(oneDrivePassphrase.text)
+                    }
+                },
+                enabled = !uiState.loading &&
+                    oneDrivePassphrase.text.isNotBlank() &&
+                    oneDrivePassphrase.text == oneDriveConfirm.text
+            ) {
+                Text(if (uiState.oneDrivePending) "Waiting for login..." else "Connect OneDrive")
+            }
+        }
+
+        uiState.oneDriveDeviceCode?.let { code ->
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Open Microsoft login and enter this code:", style = MaterialTheme.typography.bodyMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(code.userCode, style = MaterialTheme.typography.titleLarge)
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(code.verificationUri))
+                context.startActivity(intent)
+            }) {
+                Text("Open Microsoft login")
+            }
+            if (code.message.isNotBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(code.message, style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }

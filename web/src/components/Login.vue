@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { api } from '../api.js'
+import { connectOneDrive } from '../onedriveSync.js'
 
 const emit = defineEmits(['login'])
 
@@ -9,6 +10,10 @@ const password = ref('')
 const error = ref('')
 const isRegistering = ref(false)
 const loading = ref(false)
+const showOneDrive = ref(false)
+const oneDrivePassphrase = ref('')
+const oneDriveConfirm = ref('')
+const oneDriveLoading = ref(false)
 
 async function handleSubmit() {
   error.value = ''
@@ -29,6 +34,27 @@ async function handleSubmit() {
 function useWithoutAccount() {
   api.setLocalMode(true)
   emit('login')
+}
+
+async function handleOneDriveConnect() {
+  error.value = ''
+  if (!oneDrivePassphrase.value || oneDrivePassphrase.value.length < 8) {
+    error.value = 'Passphrase must be at least 8 characters'
+    return
+  }
+  if (oneDrivePassphrase.value !== oneDriveConfirm.value) {
+    error.value = 'Passphrases do not match'
+    return
+  }
+  oneDriveLoading.value = true
+  try {
+    await connectOneDrive(oneDrivePassphrase.value)
+    emit('login')
+  } catch (err) {
+    error.value = err.message || 'Failed to connect OneDrive'
+  } finally {
+    oneDriveLoading.value = false
+  }
 }
 </script>
 
@@ -84,6 +110,35 @@ function useWithoutAccount() {
     <p class="local-hint">
       Data stays on this device. You can sync with other devices via QR code.
     </p>
+
+    <div class="divider">
+      <span>or</span>
+    </div>
+
+    <button @click="showOneDrive = !showOneDrive" class="cloud-btn">
+      {{ showOneDrive ? 'Hide OneDrive setup' : 'Connect OneDrive' }}
+    </button>
+
+    <div v-if="showOneDrive" class="cloud-form">
+      <label class="cloud-label">Encryption passphrase</label>
+      <input
+        v-model="oneDrivePassphrase"
+        type="password"
+        placeholder="Create a passphrase"
+      />
+      <label class="cloud-label">Confirm passphrase</label>
+      <input
+        v-model="oneDriveConfirm"
+        type="password"
+        placeholder="Repeat passphrase"
+      />
+      <button @click="handleOneDriveConnect" class="submit-btn" :disabled="oneDriveLoading">
+        {{ oneDriveLoading ? 'Connecting...' : 'Connect OneDrive' }}
+      </button>
+      <p class="local-hint">
+        Data is end-to-end encrypted and stored in your OneDrive app folder.
+      </p>
+    </div>
   </div>
 </template>
 
@@ -237,5 +292,32 @@ input::placeholder {
   color: var(--text-muted);
   font-size: 0.75rem;
   line-height: 1.4;
+}
+
+.cloud-btn {
+  width: 100%;
+  padding: 0.875rem;
+  background: #0a66c2;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.cloud-btn:hover {
+  background: #0959a8;
+}
+
+.cloud-form {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.cloud-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
 }
 </style>

@@ -12,11 +12,13 @@ class AuthRepository(
 ) {
     val authTokenFlow: Flow<String?> = settingsStore.authTokenFlow
     val localModeFlow: Flow<Boolean> = settingsStore.localModeFlow
+    val cloudProviderFlow: Flow<String?> = settingsStore.cloudProviderFlow
 
     suspend fun login(email: String, password: String) {
         val token = apiService.login(email, password)
         settingsStore.setAuthToken(token)
         settingsStore.setLocalMode(false)
+        settingsStore.clearCloudProvider()
         syncPreferencesFromServer()
     }
 
@@ -24,6 +26,7 @@ class AuthRepository(
         val token = apiService.register(email, password)
         settingsStore.setAuthToken(token)
         settingsStore.setLocalMode(false)
+        settingsStore.clearCloudProvider()
         syncPreferencesFromServer()
     }
 
@@ -42,6 +45,14 @@ class AuthRepository(
     suspend fun enableLocalMode() {
         settingsStore.setLocalMode(true)
         settingsStore.clearAuthToken()
+        settingsStore.clearCloudProvider()
+        settingsStore.getOrCreateDeviceId()
+    }
+
+    suspend fun enableCloudMode(provider: String) {
+        settingsStore.setLocalMode(true)
+        settingsStore.clearAuthToken()
+        settingsStore.setCloudProvider(provider)
         settingsStore.getOrCreateDeviceId()
     }
 
@@ -67,5 +78,6 @@ class AuthRepository(
     suspend fun logout() {
         settingsStore.clearAuthToken()
         settingsStore.setLocalMode(false)
+        settingsStore.clearCloudProvider()
     }
 }

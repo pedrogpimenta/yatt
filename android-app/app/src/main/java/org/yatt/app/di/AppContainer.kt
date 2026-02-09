@@ -6,6 +6,7 @@ import org.yatt.app.data.local.AppDatabase
 import org.yatt.app.data.remote.ApiService
 import org.yatt.app.data.repository.AuthRepository
 import org.yatt.app.data.repository.DeviceSyncRepository
+import org.yatt.app.data.repository.OneDriveSyncRepository
 import org.yatt.app.data.repository.ProjectsRepository
 import org.yatt.app.data.repository.TimerRepository
 import org.yatt.app.notifications.NotificationController
@@ -21,6 +22,13 @@ class AppContainer(context: Context) {
     val notificationController = NotificationController(appContext)
 
     val authRepository = AuthRepository(apiService, settingsStore)
+    val oneDriveSyncRepository = OneDriveSyncRepository(
+        context = appContext,
+        settingsStore = settingsStore,
+        timerDao = database.timerDao(),
+        projectDao = database.projectDao(),
+        connectivityObserver = connectivityObserver
+    )
     val timerRepository = TimerRepository(
         apiService = apiService,
         timerDao = database.timerDao(),

@@ -8,5 +8,6 @@ data class ProjectEntity(
     @PrimaryKey val id: String,
     val name: String,
     val type: String? = null,
-    val clientName: String? = null
+    val clientName: String? = null,
+    val updatedAt: String? = null
 )

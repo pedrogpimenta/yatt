@@ -73,9 +73,14 @@ class MainActivity : ComponentActivity() {
                 onLogin = authViewModel::login,
                 onRegister = authViewModel::register,
                 onLocalMode = authViewModel::enableLocalMode,
+                onConnectOneDrive = authViewModel::connectOneDrive,
                 onDismissError = authViewModel::clearError
             )
             return
+        }
+
+        LaunchedEffect(authState.isLoggedIn) {
+            authViewModel.startCloudSyncIfEnabled()
         }
 
         RequestNotificationPermission()
