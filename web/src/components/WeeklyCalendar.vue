@@ -92,7 +92,8 @@ function getTimersForDay(dayDate) {
     
     const top = (startMinutes / (24 * 60)) * 100
     const height = ((endMinutes - startMinutes) / (24 * 60)) * 100
-    
+    const durationMs = displayEnd.getTime() - displayStart.getTime()
+
     const project = findProject(timer.project_id)
     const projectDisplay = project ? formatProjectLabel(project) : ''
     return {
@@ -102,7 +103,8 @@ function getTimersForDay(dayDate) {
       isRunning: !timer.end_time,
       displayStart,
       displayEnd,
-      projectDisplay
+      projectDisplay,
+      durationMs
     }
   })
 }
@@ -143,6 +145,16 @@ function goToToday() {
 
 function selectTimer(timer) {
   emit('select', timer)
+}
+
+function formatDurationShort(ms) {
+  const totalSeconds = Math.round(ms / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}`
+  }
+  return minutes > 0 ? `${minutes}m` : '<1m'
 }
 
 function tooltipTitle(timer) {
@@ -239,6 +251,7 @@ const weekLabel = computed(() => {
                   @click="selectTimer(timer)"
                   :title="tooltipTitle(timer)"
                 >
+                  <span class="timer-duration-block">{{ formatDurationShort(timer.durationMs) }}</span>
                   <span class="timer-tag" v-if="timer.tag">{{ timer.tag }}</span>
                   <span class="timer-project" v-if="timer.projectDisplay">{{ timer.projectDisplay }}</span>
                 </div>
@@ -412,7 +425,7 @@ const weekLabel = computed(() => {
 
 .calendar-grid {
   display: flex;
-  min-height: calc(24 * 48px);
+  min-height: calc(24 * 32px);
 }
 
 .time-column {
@@ -423,7 +436,7 @@ const weekLabel = computed(() => {
 }
 
 .hour-label {
-  height: 48px;
+  height: 32px;
   font-size: 0.75rem;
   color: var(--text-muted);
   text-align: right;
@@ -447,7 +460,7 @@ const weekLabel = computed(() => {
 }
 
 .hour-row {
-  height: 48px;
+  height: 32px;
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -490,11 +503,12 @@ const weekLabel = computed(() => {
   z-index: 0;
 }
 
-/* Timer blocks */
+/* Timer blocks – min-height so duration text always fits even for short events */
 .timer-block {
   position: absolute;
   left: 3px;
   right: 3px;
+  min-height: 1.3rem;
   background: var(--accent-color);
   border-radius: 6px;
   padding: 4px 6px;
@@ -520,6 +534,15 @@ const weekLabel = computed(() => {
 @keyframes pulse {
   0%, 100% { opacity: 0.9; }
   50% { opacity: 1; }
+}
+
+.timer-duration-block {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #fff;
+  display: block;
+  margin-bottom: 2px;
+  font-variant-numeric: tabular-nums;
 }
 
 .timer-tag {

@@ -333,6 +333,9 @@ function updateCurrentElapsed() {
   if (runningTimer.value) {
     const start = new Date(runningTimer.value.start_time).getTime()
     currentElapsed.value = Date.now() - start
+    if (selectedTimer.value && String(selectedTimer.value.id) === String(runningTimer.value.id)) {
+      selectedTimerLiveMs.value = Date.now() - start
+    }
   } else {
     currentElapsed.value = 0
   }
@@ -852,6 +855,124 @@ async function handleDelete(id) {
   }
 }
 
+// Selected timer modal (calendar): big timer + start/end + duration-based edit
+const selectedTimerEditDuration = ref('')
+const selectedTimerEditStartDate = ref('')
+const selectedTimerEditStartTime = ref('')
+const selectedTimerEditEndDate = ref('')
+const selectedTimerEditEndTime = ref('')
+const selectedTimerEditTag = ref('')
+const selectedTimerEditDescription = ref('')
+const selectedTimerEditProjectId = ref(null)
+const selectedTimerLiveMs = ref(0)
+const selectedTimerHiddenStartDate = ref('')
+const selectedTimerHiddenEndDate = ref('')
+const selectedTimerStartDatePicker = ref(null)
+const selectedTimerEndDatePicker = ref(null)
+const selectedTimerEditingTime = ref(false)
+/** When user opened the modal for a running timer; used to add time spent editing to duration on save */
+const selectedTimerEditStartedAt = ref(0)
+
+const selectedTimerDisplayDurationMs = computed(() => {
+  const t = selectedTimer.value
+  if (!t) return 0
+  if (!t.end_time) return selectedTimerLiveMs.value
+  return new Date(t.end_time).getTime() - new Date(t.start_time).getTime()
+})
+
+// Duration from form start/end (for display when editing); fallback to timer duration
+const selectedTimerFormDurationMs = computed(() => {
+  const startParts = parseDateInput(selectedTimerEditStartDate.value)
+  const startTimeParts = parseTimeInput(selectedTimerEditStartTime.value)
+  if (!startParts || !startTimeParts) return null
+  const startMs = new Date(startParts.year, startParts.month, startParts.day, startTimeParts.hours, startTimeParts.minutes).getTime()
+  if (!selectedTimerEditEndDate.value || !selectedTimerEditEndTime.value) {
+    const t = selectedTimer.value
+    if (t?.end_time) return null
+    return Date.now() - startMs
+  }
+  const endParts = parseDateInput(selectedTimerEditEndDate.value)
+  const endTimeParts = parseTimeInput(selectedTimerEditEndTime.value)
+  if (!endParts || !endTimeParts) return null
+  const endMs = new Date(endParts.year, endParts.month, endParts.day, endTimeParts.hours, endTimeParts.minutes).getTime()
+  return Math.max(0, endMs - startMs)
+})
+
+watch(selectedTimer, (t) => {
+  if (!t) return
+  const ms = t.end_time
+    ? new Date(t.end_time).getTime() - new Date(t.start_time).getTime()
+    : Date.now() - new Date(t.start_time).getTime()
+  selectedTimerEditDuration.value = formatHHmmss(ms)
+  selectedTimerEditStartDate.value = formatDateForInput(t.start_time)
+  selectedTimerEditStartTime.value = formatTimeForInput(t.start_time)
+  selectedTimerHiddenStartDate.value = toISODateString(new Date(t.start_time))
+  if (t.end_time) {
+    selectedTimerEditEndDate.value = formatDateForInput(t.end_time)
+    selectedTimerEditEndTime.value = formatTimeForInput(t.end_time)
+    selectedTimerHiddenEndDate.value = toISODateString(new Date(t.end_time))
+  } else {
+    selectedTimerEditEndDate.value = ''
+    selectedTimerEditEndTime.value = ''
+    selectedTimerHiddenEndDate.value = ''
+  }
+  selectedTimerEditTag.value = t.tag || ''
+  selectedTimerEditDescription.value = t.description || ''
+  selectedTimerEditProjectId.value = t.project_id ?? null
+  if (!t.end_time) {
+    selectedTimerLiveMs.value = ms
+    selectedTimerEditStartedAt.value = Date.now()
+  }
+  selectedTimerEditingTime.value = false
+})
+
+function selectedTimerOpenStartDatePicker() {
+  selectedTimerStartDatePicker.value?.showPicker()
+}
+function selectedTimerOpenEndDatePicker() {
+  selectedTimerEndDatePicker.value?.showPicker()
+}
+function onSelectedTimerHiddenStartDateChange() {
+  if (selectedTimerHiddenStartDate.value) {
+    const [y, m, d] = selectedTimerHiddenStartDate.value.split('-').map(Number)
+    const date = new Date(y, m - 1, d)
+    selectedTimerEditStartDate.value = formatDateForInput(date)
+  }
+}
+function onSelectedTimerHiddenEndDateChange() {
+  if (selectedTimerHiddenEndDate.value) {
+    const [y, m, d] = selectedTimerHiddenEndDate.value.split('-').map(Number)
+    const date = new Date(y, m - 1, d)
+    selectedTimerEditEndDate.value = formatDateForInput(date)
+  }
+}
+function onSelectedTimerDurationInput() {
+  const durationMs = parseHHmmss(selectedTimerEditDuration.value)
+  if (durationMs === null) return
+  const startParts = parseDateInput(selectedTimerEditStartDate.value)
+  const startTimeParts = parseTimeInput(selectedTimerEditStartTime.value)
+  if (!startParts || !startTimeParts) return
+  const startMs = new Date(startParts.year, startParts.month, startParts.day, startTimeParts.hours, startTimeParts.minutes).getTime()
+  const endMs = startMs + durationMs
+  const endDate = new Date(endMs)
+  selectedTimerEditEndDate.value = formatDateForInput(endDate)
+  selectedTimerEditEndTime.value = formatTimeForInput(endDate)
+  selectedTimerHiddenEndDate.value = toISODateString(endDate)
+}
+
+function onSelectedTimerStartDateInput() {
+  const parsed = parseDateInput(selectedTimerEditStartDate.value)
+  if (parsed) {
+    selectedTimerHiddenStartDate.value = `${parsed.year}-${String(parsed.month + 1).padStart(2, '0')}-${String(parsed.day).padStart(2, '0')}`
+  }
+}
+function onSelectedTimerEndDateInput() {
+  const parsed = parseDateInput(selectedTimerEditEndDate.value)
+  if (parsed) {
+    selectedTimerHiddenEndDate.value = `${parsed.year}-${String(parsed.month + 1).padStart(2, '0')}-${String(parsed.day).padStart(2, '0')}`
+  }
+}
+
 function selectTimerFromCalendar(timer) {
   selectedTimer.value = timer
   selectedTimerFromCalendar.value = true
@@ -861,7 +982,86 @@ function selectTimerFromCalendar(timer) {
 function closeSelectedTimer() {
   selectedTimer.value = null
   selectedTimerFromCalendar.value = false
+  selectedTimerEditingTime.value = false
   popModal('selectedTimer')
+}
+
+function toggleSelectedTimerEditTime() {
+  selectedTimerEditingTime.value = !selectedTimerEditingTime.value
+}
+
+async function handleSelectedTimerSave() {
+  const t = selectedTimer.value
+  if (!t) return
+  error.value = ''
+  let startDateTime
+  let endTime = null
+
+  if (!t.end_time) {
+    // Running timer: keep it running; add time spent editing to duration (like sidebar)
+    const durationMs = parseHHmmss(selectedTimerEditDuration.value)
+    if (durationMs === null) {
+      error.value = 'Invalid duration. Use HH:mm:ss or HH:mm'
+      return
+    }
+    const timeSinceEditStarted = Date.now() - selectedTimerEditStartedAt.value
+    const totalElapsedMs = durationMs + timeSinceEditStarted
+    startDateTime = new Date(Date.now() - totalElapsedMs)
+    endTime = null
+  } else {
+    // Stopped timer: use start/end from form
+    const startDateParts = parseDateInput(selectedTimerEditStartDate.value)
+    const startTimeParts = parseTimeInput(selectedTimerEditStartTime.value)
+    if (!startDateParts || !startTimeParts) {
+      error.value = `Invalid start. Use ${getDatePlaceholder()} and ${getTimePlaceholder()}`
+      return
+    }
+    startDateTime = new Date(startDateParts.year, startDateParts.month, startDateParts.day, startTimeParts.hours, startTimeParts.minutes)
+    if (selectedTimerEditEndDate.value && selectedTimerEditEndTime.value) {
+      const endDateParts = parseDateInput(selectedTimerEditEndDate.value)
+      const endTimeParts = parseTimeInput(selectedTimerEditEndTime.value)
+      if (!endDateParts || !endTimeParts) {
+        error.value = `Invalid end. Use ${getDatePlaceholder()} and ${getTimePlaceholder()}`
+        return
+      }
+      const endDateTime = new Date(endDateParts.year, endDateParts.month, endDateParts.day, endTimeParts.hours, endTimeParts.minutes)
+      if (endDateTime <= startDateTime) {
+        error.value = 'End must be after start'
+        return
+      }
+      endTime = endDateTime.toISOString()
+    }
+  }
+
+  try {
+    await api.updateTimer(t.id, {
+      start_time: startDateTime.toISOString(),
+      end_time: endTime,
+      tag: selectedTimerEditTag.value || null,
+      description: selectedTimerEditDescription.value?.trim() || null,
+      project_id: selectedTimerEditProjectId.value ?? null
+    })
+    await fetchTimers()
+    selectedTimerEditingTime.value = false
+    closeSelectedTimer()
+    await updatePendingSyncCount()
+  } catch (err) {
+    error.value = err.message
+  }
+}
+
+async function handleSelectedTimerDelete() {
+  const t = selectedTimer.value
+  if (!t || !confirm('Delete this timer?')) return
+  error.value = ''
+  try {
+    await api.deleteTimer(t.id)
+    await fetchTimers()
+    closeSelectedTimer()
+    await updatePendingSyncCount()
+  } catch (err) {
+    error.value = err.message
+  }
 }
 
 watch(() => [preferences.dailyGoalEnabled, preferences.includeWeekendGoals], () => {
@@ -1161,6 +1361,8 @@ onUnmounted(() => {
               :timer="timer"
               :projects="projects"
               :clients="clients"
+              :tags="tags"
+              :live-elapsed-ms="runningTimer && String(timer.id) === String(runningTimer.id) ? currentElapsed : null"
               :onCreateProject="handleCreateProject"
               @update="handleUpdate"
               @delete="handleDelete"
@@ -1171,22 +1373,100 @@ onUnmounted(() => {
       </div>
     </main>
 
-    <!-- Selected Timer Modal (for calendar view) -->
+    <!-- Selected Timer Modal (calendar: big timer, click to edit time) -->
     <div class="timer-modal-overlay" v-if="selectedTimer" @click.self="closeSelectedTimer">
-      <div class="timer-modal">
+      <div class="timer-modal selected-timer-modal">
         <button class="close-btn" @click="closeSelectedTimer">&times;</button>
-        <TimerItem 
-          :key="`selected-${selectedTimer?.id}-${preferences.dateFormat}-${preferences.timeFormat}`"
-          :timer="selectedTimer"
-          :projects="projects"
-          :clients="clients"
-          :onCreateProject="handleCreateProject"
-          :startInEditMode="selectedTimerFromCalendar"
-          @update="handleUpdate"
-          @delete="handleDelete"
-          @cancel="closeSelectedTimer"
-          @open-create-form="fetchClients"
-        />
+        <div
+          class="selected-timer-display"
+          :class="{ running: !selectedTimer.end_time, 'editing-time': selectedTimerEditingTime }"
+          @click="!selectedTimerEditingTime && toggleSelectedTimerEditTime()"
+        >
+          <button type="button" class="selected-timer-edit-btn" @click.stop="toggleSelectedTimerEditTime" title="Edit time">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <template v-if="!selectedTimerEditingTime">
+            <div class="selected-timer-elapsed">{{ formatHHmmss(!selectedTimer.end_time ? selectedTimerDisplayDurationMs : (selectedTimerFormDurationMs ?? selectedTimerDisplayDurationMs)) }}</div>
+            <div class="selected-timer-time-range">
+              {{ selectedTimerEditStartDate }} {{ selectedTimerEditStartTime }}
+              <span class="selected-timer-range-sep">–</span>
+              <template v-if="selectedTimerEditEndDate && selectedTimerEditEndTime">{{ selectedTimerEditEndDate }} {{ selectedTimerEditEndTime }}</template>
+              <span v-else class="selected-timer-running-label">Running</span>
+            </div>
+            <div class="selected-timer-meta" v-if="selectedTimer.tag">{{ selectedTimer.tag }}</div>
+            <div class="selected-timer-meta" v-if="selectedTimer.project_id && findProjectById(selectedTimer.project_id)">{{ formatProjectLabel(findProjectById(selectedTimer.project_id)) }}</div>
+            <div class="selected-timer-meta description" v-if="selectedTimer.description">{{ selectedTimer.description }}</div>
+          </template>
+          <template v-else>
+            <div class="selected-timer-inline-edit">
+              <input
+                v-model="selectedTimerEditDuration"
+                type="text"
+                class="selected-timer-duration-inline"
+                placeholder="HH:mm:ss"
+                @input="onSelectedTimerDurationInput"
+                @click.stop
+              />
+              <div class="selected-timer-inline-datetime">
+                <div class="selected-timer-datetime">
+                  <div class="date-input-wrapper">
+                    <input v-model="selectedTimerEditStartDate" type="text" :placeholder="getDatePlaceholder()" @input="onSelectedTimerStartDateInput" @click.stop />
+                    <button type="button" class="date-picker-btn" @click.stop="selectedTimerOpenStartDatePicker"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
+                    <input ref="selectedTimerStartDatePicker" type="date" v-model="selectedTimerHiddenStartDate" @change="onSelectedTimerHiddenStartDateChange" class="hidden-date-picker" />
+                  </div>
+                  <input v-model="selectedTimerEditStartTime" type="text" :placeholder="getTimePlaceholder()" @click.stop />
+                </div>
+                <div class="selected-timer-datetime">
+                  <div class="date-input-wrapper">
+                    <input v-model="selectedTimerEditEndDate" type="text" :placeholder="getDatePlaceholder()" @input="onSelectedTimerEndDateInput" @click.stop />
+                    <button type="button" class="date-picker-btn" @click.stop="selectedTimerOpenEndDatePicker"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
+                    <input ref="selectedTimerEndDatePicker" type="date" v-model="selectedTimerHiddenEndDate" @change="onSelectedTimerHiddenEndDateChange" class="hidden-date-picker" />
+                  </div>
+                  <input v-model="selectedTimerEditEndTime" type="text" :placeholder="getTimePlaceholder()" @click.stop />
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <form class="selected-timer-form" @submit.prevent="handleSelectedTimerSave">
+          <div class="form-group">
+            <label>Tag</label>
+            <TagInput
+              v-model="selectedTimerEditTag"
+              :tags="tags"
+              placeholder="Tag (optional)"
+              @submit="handleSelectedTimerSave"
+            />
+          </div>
+          <div class="form-group">
+            <label>Description</label>
+            <textarea
+              v-model="selectedTimerEditDescription"
+              placeholder="Optional description..."
+              rows="2"
+              class="selected-timer-description-input"
+            />
+          </div>
+          <div class="form-group">
+            <label>Project</label>
+            <ProjectSelector
+              v-model="selectedTimerEditProjectId"
+              :projects="projects"
+              :clients="clients"
+              :onCreate="handleCreateProject"
+              placeholder="Project (optional)"
+              @open-create-form="fetchClients"
+            />
+          </div>
+          <p v-if="error" class="form-error">{{ error }}</p>
+          <div class="selected-timer-actions">
+            <button type="button" @click="handleSelectedTimerDelete" class="selected-timer-delete-btn">Delete</button>
+            <div class="selected-timer-actions-right">
+              <button type="button" @click="closeSelectedTimer" class="selected-timer-cancel-btn">Cancel</button>
+              <button type="submit" class="selected-timer-save-btn">Save</button>
+            </div>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -2031,6 +2311,310 @@ onUnmounted(() => {
 
 .close-btn:hover {
   color: var(--text-primary);
+}
+
+/* Selected Timer Modal (big timer + duration edit like sidebar) */
+.selected-timer-modal {
+  min-width: 320px;
+  max-width: min(420px, 90vw);
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.selected-timer-form {
+  min-width: 0;
+}
+
+.selected-timer-display {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+  text-align: center;
+  position: relative;
+  cursor: pointer;
+}
+
+.selected-timer-display.editing-time {
+  cursor: default;
+  text-align: left;
+}
+
+.selected-timer-display.running {
+  border-color: var(--timer-border);
+  background: var(--timer-bg);
+}
+
+.selected-timer-edit-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.35rem;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.selected-timer-edit-btn:hover {
+  color: var(--accent-color);
+  background: var(--bg-tertiary);
+}
+
+.selected-timer-time-range {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin-top: 0.5rem;
+}
+
+.selected-timer-range-sep {
+  margin: 0 0.35rem;
+  color: var(--text-muted);
+}
+
+.selected-timer-running-label {
+  color: var(--accent-color);
+}
+
+.selected-timer-inline-edit {
+  min-width: 0;
+}
+
+.selected-timer-duration-inline {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.selected-timer-duration-inline:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.selected-timer-inline-datetime {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.selected-timer-elapsed {
+  font-size: 2.25rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+
+.selected-timer-display.running .selected-timer-elapsed {
+  color: var(--accent-color);
+}
+
+.selected-timer-meta {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-top: 0.375rem;
+}
+
+.selected-timer-meta.description {
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-align: left;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.selected-timer-status {
+  font-size: 0.75rem;
+  color: var(--accent-color);
+  margin-top: 0.25rem;
+}
+
+.selected-timer-form .form-group {
+  margin-bottom: 0.75rem;
+}
+
+.selected-timer-form .form-group label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+
+.selected-timer-form .elapsed-input {
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  font-size: 1.125rem;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.selected-timer-form .elapsed-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.selected-timer-datetime {
+  display: flex;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.selected-timer-datetime > .date-input-wrapper {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  position: relative;
+}
+
+.selected-timer-datetime > .date-input-wrapper input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  padding: 0.625rem 2.5rem 0.625rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.selected-timer-datetime > .date-input-wrapper input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.selected-timer-datetime > input[type="text"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  width: 5.5rem;
+  max-width: 50%;
+  padding: 0.625rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.selected-timer-datetime > input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.selected-timer-form .selected-timer-description-input {
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 4rem;
+  line-height: 1.4;
+}
+
+.selected-timer-form .selected-timer-description-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.selected-timer-form .selected-timer-description-input::placeholder {
+  color: var(--text-muted);
+}
+
+.selected-timer-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.selected-timer-actions-right {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.selected-timer-delete-btn {
+  background: transparent;
+  border: 1px solid var(--danger-color);
+  color: var(--danger-color);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.selected-timer-delete-btn:hover {
+  background: var(--danger-color);
+  color: #fff;
+}
+
+.selected-timer-cancel-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 0.625rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.selected-timer-cancel-btn:hover {
+  border-color: var(--border-light);
+  color: var(--text-primary);
+}
+
+.selected-timer-save-btn {
+  background: var(--accent-color);
+  border: none;
+  color: #fff;
+  padding: 0.625rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.selected-timer-save-btn:hover {
+  background: var(--accent-hover);
+}
+
+.selected-timer-form .form-error {
+  color: var(--danger-color);
+  font-size: 0.875rem;
+  margin: 0.5rem 0 0 0;
 }
 
 /* Manual Entry Button */
