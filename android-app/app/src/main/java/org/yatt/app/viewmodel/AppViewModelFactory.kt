@@ -8,7 +8,7 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         return when {
             modelClass.isAssignableFrom(AuthViewModel::class.java) -> {
-                AuthViewModel(container.authRepository) as T
+                AuthViewModel(container.authRepository, container.fcmRegistration) as T
             }
             modelClass.isAssignableFrom(TimerViewModel::class.java) -> {
                 TimerViewModel(container.timerRepository, container.projectsRepository, container.settingsStore) as T
@@ -17,7 +17,8 @@ class AppViewModelFactory(private val container: AppContainer) : ViewModelProvid
                 SettingsViewModel(
                     container.settingsStore,
                     container.authRepository,
-                    container.timerRepository
+                    container.timerRepository,
+                    container.fcmRegistration
                 ) as T
             }
             modelClass.isAssignableFrom(DeviceSyncViewModel::class.java) -> {

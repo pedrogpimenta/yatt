@@ -3,6 +3,10 @@ plugins {
     id("org.jetbrains.kotlin.android")
     kotlin("kapt")
 }
+// Apply Google Services only when google-services.json is present (required for FCM)
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
 
 android {
     namespace = "org.yatt.app"
@@ -81,10 +85,14 @@ dependencies {
     kapt("androidx.room:room-compiler:2.6.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     implementation("com.google.zxing:core:3.5.3")
+
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging-ktx")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

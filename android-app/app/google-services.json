@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "984463466506",
+    "project_id": "time-command-4fb8b",
+    "storage_bucket": "time-command-4fb8b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:984463466506:android:899a7c31dfd7e97b73fff3",
+        "android_client_info": {
+          "package_name": "org.yatt.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBKRjEmH2j0p-1pi0ir_ziKDTvpglPOy2g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

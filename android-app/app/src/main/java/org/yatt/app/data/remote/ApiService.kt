@@ -191,6 +191,16 @@ class ApiService(private val settingsStore: SettingsStore) {
         requestJson("projects/$id", "DELETE")
     }
 
+    suspend fun registerDeviceToken(token: String, platform: String = "android") {
+        val payload = JSONObject().put("token", token).put("platform", platform)
+        requestJson("devices/register", "POST", payload)
+    }
+
+    suspend fun unregisterDeviceToken(token: String) {
+        val payload = JSONObject().put("token", token)
+        execute("devices/unregister", "POST", payload)
+    }
+
     suspend fun createSyncSession(
         deviceId: String,
         timers: List<TimerEntity>,
@@ -300,6 +310,7 @@ class ApiService(private val settingsStore: SettingsStore) {
                 "POST", "PATCH", "PUT" -> body ?: "".toRequestBody("application/json; charset=utf-8".toMediaType())
                 else -> null
             })
+            .addHeader("x-client-platform", "android")
 
         if (!token.isNullOrBlank()) {
             requestBuilder.addHeader("Authorization", "Bearer $token")

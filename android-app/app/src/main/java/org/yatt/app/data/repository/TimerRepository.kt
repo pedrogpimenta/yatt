@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.yatt.app.data.SettingsStore
+import org.yatt.app.data.local.IdMappingDao
+import org.yatt.app.data.local.IdMappingEntity
 import org.yatt.app.data.local.ProjectDao
 import org.yatt.app.data.local.SyncOperationEntity
 import org.yatt.app.data.local.SyncQueueDao
@@ -24,6 +26,7 @@ class TimerRepository(
     private val apiService: ApiService,
     private val timerDao: TimerDao,
     private val syncQueueDao: SyncQueueDao,
+    private val idMappingDao: IdMappingDao,
     private val projectDao: ProjectDao,
     private val settingsStore: SettingsStore,
     private val connectivityObserver: ConnectivityObserver,
@@ -36,7 +39,11 @@ class TimerRepository(
     suspend fun refreshTimers() = withContext(Dispatchers.IO) {
         if (isLocalMode()) return@withContext
         if (!isOnline()) return@withContext
-        if (syncQueueDao.getCount() > 0) return@withContext
+        // Sync pending queue first so server has latest before we fetch
+        if (syncQueueDao.getCount() > 0) {
+            attemptSync()
+            if (syncQueueDao.getCount() > 0) return@withContext
+        }
         val timers = apiService.getTimers()
         timerDao.clearTimers()
         timerDao.saveTimers(timers)
@@ -142,9 +149,9 @@ class TimerRepository(
                     val timers = timerDao.getTimers()
                     val dayStartHour = settingsStore.preferencesFlow.first().dayStartHour
                     val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, updated.id)
-                    notificationController.updateTimer(updated, totalWithout)
+                    runOnMain { notificationController.updateTimer(updated, totalWithout) }
                 } else if (existing.endTime == null) {
-                    notificationController.stopTimer()
+                    runOnMain { notificationController.stopTimer() }
                 }
             }
 
@@ -160,9 +167,9 @@ class TimerRepository(
                         val timers = timerDao.getTimers()
                         val dayStartHour = settingsStore.preferencesFlow.first().dayStartHour
                         val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, updated.id)
-                        notificationController.updateTimer(updated, totalWithout)
+                        runOnMain { notificationController.updateTimer(updated, totalWithout) }
                     } else {
-                        notificationController.stopTimer()
+                        runOnMain { notificationController.stopTimer() }
                     }
                     updated
                 } catch (ex: Exception) {
@@ -191,7 +198,7 @@ class TimerRepository(
         if (existing != null) {
             val updated = existing.copy(endTime = endTime)
             timerDao.saveTimer(updated)
-            notificationController.stopTimer()
+            runOnMain { notificationController.stopTimer() }
         }
 
         if (isLocalMode()) {
@@ -202,7 +209,7 @@ class TimerRepository(
             return@withContext try {
                 val updated = apiService.stopTimer(id)
                 timerDao.saveTimer(updated)
-                notificationController.stopTimer()
+                runOnMain { notificationController.stopTimer() }
                 updated
             } catch (ex: Exception) {
                 enqueueSync(
@@ -228,7 +235,7 @@ class TimerRepository(
         val existing = timerDao.getTimer(id)
         timerDao.deleteTimer(id)
         if (existing?.endTime == null) {
-            notificationController.stopTimer()
+            runOnMain { notificationController.stopTimer() }
         }
         if (isLocalMode()) return@withContext
 
@@ -284,6 +291,7 @@ class TimerRepository(
                         if (!operation.localId.isNullOrBlank()) {
                             idMapping[operation.localId] = created.id
                             timerDao.updateTimerId(operation.localId, created.id)
+                            idMappingDao.insert(IdMappingEntity(localId = operation.localId, serverId = created.id))
                         }
                     }
                     SyncType.UPDATE -> {
@@ -410,9 +418,16 @@ class TimerRepository(
 
     private suspend fun isOnline(): Boolean = connectivityObserver.isOnline.first()
 
-    private fun resolveId(id: String?, mapping: Map<String, String>): String? {
+    /** Run on Main so Context (startForegroundService/stopService) is not called from background. */
+    private suspend fun runOnMain(block: () -> Unit) = withContext(Dispatchers.Main.immediate) { block() }
+
+    private suspend fun resolveId(id: String?, mapping: Map<String, String>): String? {
         if (id == null) return null
-        return mapping[id] ?: id
+        mapping[id]?.let { return it }
+        if (isLocalId(id)) {
+            idMappingDao.getServerId(id)?.let { return it }
+        }
+        return id
     }
 
     private fun stringOrNull(json: JSONObject, key: String): String? {
@@ -431,18 +446,18 @@ class TimerRepository(
             val timers = timerDao.getTimers()
             val dayStartHour = settingsStore.preferencesFlow.first().dayStartHour
             val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, timer.id)
-            notificationController.startTimer(timer, totalWithout)
+            runOnMain { notificationController.startTimer(timer, totalWithout) }
         }
     }
 
     /** Call when timer list changes to keep ongoing notification in sync (e.g. after app start or refresh). */
-    fun syncNotificationWithRunningTimer(timers: List<TimerEntity>, dayStartHour: Int) {
+    suspend fun syncNotificationWithRunningTimer(timers: List<TimerEntity>, dayStartHour: Int) {
         val running = timers.firstOrNull { it.endTime == null }
         if (running != null) {
             val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, running.id)
-            notificationController.startTimer(running, totalWithout)
+            runOnMain { notificationController.startTimer(running, totalWithout) }
         } else {
-            notificationController.stopTimer()
+            runOnMain { notificationController.stopTimer() }
         }
     }
 

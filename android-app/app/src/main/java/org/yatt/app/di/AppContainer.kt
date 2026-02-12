@@ -8,6 +8,7 @@ import org.yatt.app.data.repository.AuthRepository
 import org.yatt.app.data.repository.DeviceSyncRepository
 import org.yatt.app.data.repository.ProjectsRepository
 import org.yatt.app.data.repository.TimerRepository
+import org.yatt.app.notifications.FcmRegistration
 import org.yatt.app.notifications.NotificationController
 import org.yatt.app.util.ConnectivityObserver
 
@@ -19,12 +20,14 @@ class AppContainer(context: Context) {
     val apiService = ApiService(settingsStore)
     val connectivityObserver = ConnectivityObserver(appContext)
     val notificationController = NotificationController(appContext)
+    val fcmRegistration = FcmRegistration(apiService, settingsStore)
 
     val authRepository = AuthRepository(apiService, settingsStore)
     val timerRepository = TimerRepository(
         apiService = apiService,
         timerDao = database.timerDao(),
         syncQueueDao = database.syncQueueDao(),
+        idMappingDao = database.idMappingDao(),
         projectDao = database.projectDao(),
         settingsStore = settingsStore,
         connectivityObserver = connectivityObserver,

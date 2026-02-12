@@ -80,6 +80,10 @@ class MainActivity : ComponentActivity() {
 
         RequestNotificationPermission()
 
+        LaunchedEffect(Unit) {
+            container.fcmRegistration.registerWithApi()
+        }
+
         val pendingStopId by pendingStopTimerIdState
         LaunchedEffect(pendingStopId) {
             pendingStopId?.let { id ->

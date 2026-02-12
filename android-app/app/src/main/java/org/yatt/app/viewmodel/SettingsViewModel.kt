@@ -10,6 +10,7 @@ import org.yatt.app.data.SettingsStore
 import org.yatt.app.data.model.UserProfile
 import org.yatt.app.data.repository.AuthRepository
 import org.yatt.app.data.repository.TimerRepository
+import org.yatt.app.notifications.FcmRegistration
 
 data class SettingsUiState(
     val userProfile: UserProfile? = null,
@@ -21,7 +22,8 @@ data class SettingsUiState(
 class SettingsViewModel(
     private val settingsStore: SettingsStore,
     private val authRepository: AuthRepository,
-    private val timerRepository: TimerRepository
+    private val timerRepository: TimerRepository,
+    private val fcmRegistration: FcmRegistration
 ) : ViewModel() {
     val preferencesFlow = settingsStore.preferencesFlow
     val authTokenFlow = settingsStore.authTokenFlow
@@ -129,6 +131,7 @@ class SettingsViewModel(
             if (clearLocalData) {
                 timerRepository.clearAllLocalData()
             }
+            fcmRegistration.unregisterFromApi()
             authRepository.logout()
         }
     }

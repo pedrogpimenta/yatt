@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.yatt.app.data.repository.AuthRepository
+import org.yatt.app.notifications.FcmRegistration
 
 data class AuthUiState(
     val isLoggedIn: Boolean = false,
@@ -16,7 +17,10 @@ data class AuthUiState(
     val error: String? = null
 )
 
-class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
+class AuthViewModel(
+    private val authRepository: AuthRepository,
+    private val fcmRegistration: FcmRegistration
+) : ViewModel() {
     private val loading = MutableStateFlow(false)
     private val error = MutableStateFlow<String?>(null)
 
@@ -40,6 +44,7 @@ class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
             error.value = null
             try {
                 authRepository.login(email.trim(), password)
+                fcmRegistration.registerWithApi()
             } catch (ex: Exception) {
                 error.value = ex.message
             } finally {
@@ -54,6 +59,7 @@ class AuthViewModel(private val authRepository: AuthRepository) : ViewModel() {
             error.value = null
             try {
                 authRepository.register(email.trim(), password)
+                fcmRegistration.registerWithApi()
             } catch (ex: Exception) {
                 error.value = ex.message
             } finally {
