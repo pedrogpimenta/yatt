@@ -67,7 +67,7 @@ function getMessaging() {
   initAttempted = true;
   const serviceAccount = loadServiceAccountFromEnv();
   if (!serviceAccount) {
-    console.warn('FCM disabled: no service account configured.');
+    console.warn('FCM disabled: no service account configured. Set FCM_SERVICE_ACCOUNT_PATH or FCM_SERVICE_ACCOUNT_JSON.');
     return null;
   }
 
@@ -76,6 +76,8 @@ function getMessaging() {
       credential: admin.credential.cert(serviceAccount)
     });
     cachedMessaging = admin.messaging();
+    const projectId = serviceAccount.project_id || '(unknown)';
+    console.log('FCM enabled: Firebase Admin initialized for project', projectId);
     return cachedMessaging;
   } catch (err) {
     console.error('Failed to initialize Firebase Admin:', err);
@@ -118,6 +120,7 @@ async function sendTimerEvent({ userId, event, timer }) {
 
   const tokens = loadUserTokens(userId).filter(Boolean);
   if (tokens.length === 0) {
+    console.log('FCM: no device tokens for user', userId, '- timer', event, 'not pushed');
     return { skipped: 'no_tokens' };
   }
 
@@ -134,7 +137,8 @@ async function sendTimerEvent({ userId, event, timer }) {
 
     response.responses.forEach((result, index) => {
       if (!result.success && result.error) {
-        const code = result.error.code;
+        const code = result.error?.code || '';
+        console.warn('FCM send failed:', code, result.error?.message || result.error);
         if (INVALID_TOKEN_ERRORS.has(code)) {
           invalidTokens.push(batch[index]);
         }
@@ -143,6 +147,7 @@ async function sendTimerEvent({ userId, event, timer }) {
   }
 
   removeInvalidTokens(userId, invalidTokens);
+  console.log('FCM: timer', event, 'sent to', tokens.length, 'device(s), invalid:', invalidTokens.length);
   return { sent: tokens.length, invalid: invalidTokens.length };
 }
 

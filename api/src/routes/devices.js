@@ -22,6 +22,22 @@ function normalizePlatform(value) {
   return normalized || 'android';
 }
 
+// List registered devices for current user (for verifying FCM setup)
+router.get('/', (req, res) => {
+  try {
+    const rows = db.prepare(
+      'SELECT platform, last_seen_at FROM device_tokens WHERE user_id = ? ORDER BY last_seen_at DESC'
+    ).all(req.userId);
+    res.json({
+      count: rows.length,
+      devices: rows.map((r) => ({ platform: r.platform, last_seen_at: r.last_seen_at }))
+    });
+  } catch (err) {
+    console.error('List devices error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Register or refresh a device token for push notifications
 router.post('/register', (req, res) => {
   try {
@@ -45,6 +61,7 @@ router.post('/register', (req, res) => {
         last_seen_at = excluded.last_seen_at
     `).run(req.userId, token, platform, now, now);
 
+    console.log('FCM: device registered for user', req.userId, 'platform', platform);
     res.status(201).json({ token, platform });
   } catch (err) {
     console.error('Register device token error:', err);
