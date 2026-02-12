@@ -1,5 +1,6 @@
 package org.yatt.app.notifications
 
+import android.util.Log
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -23,12 +24,21 @@ class FcmRegistration(
 
     suspend fun registerWithApi(): Boolean = withContext(Dispatchers.IO) {
         val authToken = settingsStore.authTokenFlow.first()
-        if (authToken.isNullOrBlank()) return@withContext false
-        val fcmToken = getToken() ?: return@withContext false
+        if (authToken.isNullOrBlank()) {
+            Log.w(TAG, "FCM register skipped: no auth token")
+            return@withContext false
+        }
+        val fcmToken = getToken()
+        if (fcmToken.isNullOrBlank()) {
+            Log.w(TAG, "FCM register skipped: no FCM token (check google-services.json)")
+            return@withContext false
+        }
         try {
             apiService.registerDeviceToken(fcmToken, "android")
+            Log.d(TAG, "FCM token registered with API")
             true
-        } catch (_: ApiException) {
+        } catch (e: ApiException) {
+            Log.e(TAG, "FCM register failed: ${e.message}")
             false
         }
     }
@@ -40,8 +50,13 @@ class FcmRegistration(
         try {
             apiService.unregisterDeviceToken(fcmToken)
             true
-        } catch (_: ApiException) {
+        } catch (e: ApiException) {
+            Log.e(TAG, "FCM unregister failed: ${e.message}")
             false
         }
+    }
+
+    companion object {
+        private const val TAG = "YattFcmReg"
     }
 }

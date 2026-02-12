@@ -20,6 +20,7 @@ class YattFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val data = message.data
+        Log.d(TAG, "FCM onMessageReceived: type=${data["type"]} event=${data["event"]}")
         if (data["type"] != "timer") return
 
         val event = data["event"] ?: return

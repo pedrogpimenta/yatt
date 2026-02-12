@@ -41,6 +41,7 @@ To receive timer push notifications (e.g. when a timer is started or stopped on 
 **3. Behaviour**
 
 - The app registers its FCM token with the API on **login** and when **opening the app** while logged in; it unregisters on **logout**.
+- **Verifying FCM:** See [docs/FCM_VERIFICATION.md](../docs/FCM_VERIFICATION.md) for step-by-step checks on both the app and the API.
 - The API sends FCM **data** messages (no user-visible notification) when a timer is **started** or **stopped** from another client (e.g. web). The Android app uses them to update the running-timer notification.
 - Requests from the Android app send **`X-Client-Platform: android`**, so the API does **not** send FCM for the same user’s actions from this device.
 

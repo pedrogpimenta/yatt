@@ -153,6 +153,14 @@ PlasmoidItem {
             tx.executeSql("INSERT OR REPLACE INTO timers (id, user_id, start_time, end_time, tag, description, project_id, project_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [String(serverTimer.id), serverTimer.user_id, serverTimer.start_time, serverTimer.end_time || null, serverTimer.tag || null, serverTimer.description || null, serverTimer.project_id != null ? serverTimer.project_id : null, serverTimer.project_name || null])
         })
+        setMeta("idmap_" + localId, String(serverTimer.id))
+    }
+
+    function resolveTimerId(timerId) {
+        if (!timerId) return null
+        if (!isLocalId(timerId)) return timerId
+        var serverId = getMeta("idmap_" + timerId)
+        return serverId || null
     }
 
     function addSyncOp(op, timerId, data) {
@@ -319,8 +327,11 @@ PlasmoidItem {
         apiRequest("GET", "/timers/tags", null, function() {
             isOnline = true
             updatePendingCount()
-            if (pendingSyncCount > 0 && !isSyncing) runSync(false)
-            if (!wsConnected) fetchTimers(true)
+            if (pendingSyncCount > 0 && !isSyncing) {
+                runSync(false)
+            } else if (!wsConnected) {
+                fetchTimers(true)
+            }
         }, function() { isOnline = false })
     }
 
@@ -356,25 +367,43 @@ PlasmoidItem {
                 removeSyncOp(it.id)
                 processSyncIndex(q, idx + 1)
             }, function() { processSyncIndex(q, idx + 1) })
-        } else if (it.operation === "update" && !isLocalId(it.timer_id)) {
-            apiRequest("PATCH", "/timers/" + it.timer_id, it.data, function() {
+        } else if (it.operation === "update") {
+            var targetId = resolveTimerId(it.timer_id)
+            if (!targetId && isLocalId(it.timer_id)) {
+                removeSyncOp(it.id)
+                processSyncIndex(q, idx + 1)
+                return
+            }
+            apiRequest("PATCH", "/timers/" + String(targetId), it.data, function() {
                 removeSyncOp(it.id)
                 processSyncIndex(q, idx + 1)
             }, function(xhr) {
                 if (xhr && (xhr.status === 400 || xhr.status === 404)) removeSyncOp(it.id)
                 processSyncIndex(q, idx + 1)
             })
-        } else if (it.operation === "stop" && !isLocalId(it.timer_id)) {
+        } else if (it.operation === "stop") {
+            var targetId = resolveTimerId(it.timer_id)
+            if (!targetId && isLocalId(it.timer_id)) {
+                removeSyncOp(it.id)
+                processSyncIndex(q, idx + 1)
+                return
+            }
             var endTime = it.data && it.data.end_time ? it.data.end_time : new Date().toISOString()
-            apiRequest("PATCH", "/timers/" + String(it.timer_id), { end_time: endTime }, function() {
+            apiRequest("PATCH", "/timers/" + String(targetId), { end_time: endTime }, function() {
                 removeSyncOp(it.id)
                 processSyncIndex(q, idx + 1)
             }, function(xhr) {
                 if (xhr && (xhr.status === 400 || xhr.status === 404)) removeSyncOp(it.id)
                 processSyncIndex(q, idx + 1)
             })
-        } else if (it.operation === "delete" && !isLocalId(it.timer_id)) {
-            apiRequest("DELETE", "/timers/" + it.timer_id, null, function() {
+        } else if (it.operation === "delete") {
+            var targetId = resolveTimerId(it.timer_id)
+            if (!targetId && isLocalId(it.timer_id)) {
+                removeSyncOp(it.id)
+                processSyncIndex(q, idx + 1)
+                return
+            }
+            apiRequest("DELETE", "/timers/" + String(targetId), null, function() {
                 removeSyncOp(it.id)
                 processSyncIndex(q, idx + 1)
             }, function(xhr) {
@@ -449,6 +478,11 @@ PlasmoidItem {
         if (!force && loading) return
         loading = true
         loadingSafety.restart()
+        if (pendingSyncCount > 0 && !isSyncing && (isOnline || force)) {
+            runSync(force)
+            loading = false
+            return
+        }
         apiRequest("GET", "/timers", null, function(timers) {
             loading = false
             isOnline = true
