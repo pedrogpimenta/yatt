@@ -153,6 +153,13 @@ async function sendTimerEvent({ userId, event, timer }) {
 
 /** Call at startup to initialize FCM and log status (enabled/disabled). */
 function initAndLogFcmStatus() {
+  const hasEnabled = Object.prototype.hasOwnProperty.call(process.env, 'FCM_ENABLED');
+  const hasPath = Object.prototype.hasOwnProperty.call(process.env, 'FCM_SERVICE_ACCOUNT_PATH') && process.env.FCM_SERVICE_ACCOUNT_PATH;
+  const hasJson = Object.prototype.hasOwnProperty.call(process.env, 'FCM_SERVICE_ACCOUNT_JSON') && process.env.FCM_SERVICE_ACCOUNT_JSON;
+  console.log('FCM env: FCM_ENABLED=' + (hasEnabled ? process.env.FCM_ENABLED : '(not set)') +
+    ', FCM_SERVICE_ACCOUNT_PATH=' + (hasPath ? 'set' : 'not set') +
+    ', FCM_SERVICE_ACCOUNT_JSON=' + (hasJson ? 'set' : 'not set'));
+
   if (!isFcmEnabled()) {
     console.log('FCM disabled: FCM_ENABLED is false');
     return;
