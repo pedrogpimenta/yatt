@@ -151,4 +151,16 @@ async function sendTimerEvent({ userId, event, timer }) {
   return { sent: tokens.length, invalid: invalidTokens.length };
 }
 
-module.exports = { sendTimerEvent };
+/** Call at startup to initialize FCM and log status (enabled/disabled). */
+function initAndLogFcmStatus() {
+  if (!isFcmEnabled()) {
+    console.log('FCM disabled: FCM_ENABLED is false');
+    return;
+  }
+  const messaging = getMessaging();
+  if (!messaging) {
+    console.log('FCM disabled: could not initialize (check FCM_SERVICE_ACCOUNT_PATH or FCM_SERVICE_ACCOUNT_JSON)');
+  }
+}
+
+module.exports = { sendTimerEvent, initAndLogFcmStatus };

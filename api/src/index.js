@@ -9,7 +9,7 @@ const timerRoutes = require('./routes/timers');
 const syncRoutes = require('./routes/sync');
 const projectRoutes = require('./routes/projects');
 const clientRoutes = require('./routes/clients');
-const { sendTimerEvent } = require('./notifications/fcm');
+const { sendTimerEvent, initAndLogFcmStatus } = require('./notifications/fcm');
 const { JWT_SECRET } = require('./middleware/auth');
 
 const app = express();
@@ -105,4 +105,5 @@ app.get('/health', (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`YATT API running on port ${PORT}`);
+  initAndLogFcmStatus();
 });
