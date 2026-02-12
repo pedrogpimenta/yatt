@@ -5,8 +5,11 @@ services:
       - "3000:3000"
     volumes:
       - api-data:/app/data
+      - /time-command-4fb8b-firebase-adminsdk-fbsvc-e8917f2b5a.json:/app/time-command-4fb8b-firebase-adminsdk-fbsvc-e8917f2b5a.json
     environment:
       - JWT_SECRET=${JWT_SECRET:-please-change-this-secret}
+      - FCM_ENABLED=true
+      - FCM_SERVICE_ACCOUNT_PATH=/app/time-command-4fb8b-firebase-adminsdk-fbsvc-e8917f2b5a.json
       - PORT=3000
     restart: unless-stopped
 
