@@ -211,6 +211,18 @@ class TimerRepository(
                 timerDao.saveTimer(updated)
                 runOnMain { notificationController.stopTimer() }
                 updated
+            } catch (ex: ApiException) {
+                if (ex.statusCode == 404 || ex.statusCode == 400) {
+                    if (existing == null && isOnline()) refreshTimers()
+                    return@withContext timerDao.getTimer(id)
+                }
+                enqueueSync(
+                    type = SyncType.STOP,
+                    timerId = id,
+                    localId = null,
+                    data = jsonData(null, endTime, null)
+                )
+                timerDao.getTimer(id)
             } catch (ex: Exception) {
                 enqueueSync(
                     type = SyncType.STOP,

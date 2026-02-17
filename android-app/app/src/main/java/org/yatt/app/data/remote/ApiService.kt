@@ -322,7 +322,7 @@ class ApiService(private val settingsStore: SettingsStore) {
             response.close()
             settingsStore.clearAuthToken()
             settingsStore.setLocalMode(false)
-            throw ApiException("Unauthorized")
+            throw ApiException("Unauthorized", 401)
         }
         if (response.code == 204) {
             response.close()
@@ -332,7 +332,7 @@ class ApiService(private val settingsStore: SettingsStore) {
         if (!response.isSuccessful) {
             response.close()
             val errorMessage = runCatching { JSONObject(responseBody).optString("error") }.getOrNull()
-            throw ApiException(errorMessage ?: "Request failed with ${response.code}")
+            throw ApiException(errorMessage ?: "Request failed with ${response.code}", response.code)
         }
         response.close()
         return responseBody
@@ -348,19 +348,22 @@ class ApiService(private val settingsStore: SettingsStore) {
     }
 
     private fun jsonToTimer(json: JSONObject): TimerEntity {
-        val idValue = json.get("id").toString()
-        val endTime = if (json.isNull("end_time")) null else json.getString("end_time")
-        val tag = if (json.isNull("tag")) null else json.getString("tag")
+        val idValue = json.opt("id")?.toString()
+            ?: throw IllegalArgumentException("Timer JSON missing id")
+        val startTime = json.optString("start_time").takeIf { it.isNotEmpty() }
+            ?: throw IllegalArgumentException("Timer JSON missing start_time")
+        val endTime = if (json.isNull("end_time")) null else json.optString("end_time").takeIf { it.isNotEmpty() }
+        val tag = if (json.isNull("tag")) null else json.optString("tag").takeIf { it.isNotEmpty() }
         val description = if (json.isNull("description")) null else json.optString("description").takeIf { it.isNotEmpty() }
         val projectId = when {
             json.isNull("project_id") -> null
-            else -> json.get("project_id").toString()
+            else -> json.opt("project_id")?.toString()
         }
         val projectName = if (json.isNull("project_name")) null else json.optString("project_name").takeIf { it.isNotEmpty() }
         val clientName = if (json.isNull("client_name")) null else json.optString("client_name").takeIf { it.isNotEmpty() }
         return TimerEntity(
             id = idValue,
-            startTime = json.getString("start_time"),
+            startTime = startTime,
             endTime = endTime,
             tag = tag,
             description = description,
@@ -440,4 +443,4 @@ class ApiService(private val settingsStore: SettingsStore) {
     }
 }
 
-class ApiException(message: String) : IOException(message)
+class ApiException(message: String, val statusCode: Int? = null) : IOException(message)

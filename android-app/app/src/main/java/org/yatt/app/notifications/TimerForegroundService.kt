@@ -157,7 +157,7 @@ class TimerForegroundService : Service() {
         const val EXTRA_TODAY_TOTAL_SECONDS = "extra_today_total_seconds"
         const val EXTRA_STOP_TIMER_ID = "org.yatt.app.extra.STOP_TIMER_ID"
 
-        private const val CHANNEL_ID = "timer_channel"
-        private const val NOTIFICATION_ID = 2001
+        internal const val CHANNEL_ID = "timer_channel"
+        internal const val NOTIFICATION_ID = 2001
     }
 }

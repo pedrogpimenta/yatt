@@ -8,6 +8,10 @@ class YattApp : Application() {
     lateinit var container: AppContainer
         private set
 
+    /** True once [container] has been initialized (after [onCreate]). Used by BootReceiver etc. */
+    val isContainerReady: Boolean
+        get() = ::container.isInitialized
+
     /** Set when MainActivity is launched with "Stop timer" from notification; consumed by YattAppContent. */
     var pendingStopTimerId: String? = null
 

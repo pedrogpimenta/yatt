@@ -228,6 +228,22 @@ class TimerViewModel(
         }
     }
 
+    /** Stop the current timer after saving tag/project/description in one sequential flow (avoids race and hang). */
+    fun stopTimerWithPendingEdits(timerId: String, tag: String?, projectId: String? = null, description: String? = null) {
+        viewModelScope.launch {
+            error.value = null
+            try {
+                val sanitizedTag = tag?.trim()?.ifBlank { null }
+                val sanitizedDesc = description?.trim()?.takeIf { it.isNotBlank() }
+                timerRepository.updateTimer(timerId, null, null, sanitizedTag, sanitizedDesc, projectId)
+                timerRepository.stopTimer(timerId)
+                refreshTags()
+            } catch (ex: Exception) {
+                error.value = ex.message
+            }
+        }
+    }
+
     fun updateTimer(id: String, startTime: String, endTime: String?, tag: String?, description: String? = null, projectId: String? = null) {
         viewModelScope.launch {
             error.value = null

@@ -399,8 +399,7 @@ private fun TimerTabContent(
             FilledTonalButton(
                 onClick = {
                     if (isRunning && currentTimer != null) {
-                        timerViewModel.updateRunningFields(currentTimer.id, newTag, newProjectId, newDescription)
-                        timerViewModel.stopTimer(currentTimer.id)
+                        timerViewModel.stopTimerWithPendingEdits(currentTimer.id, newTag, newProjectId, newDescription)
                     } else {
                         timerViewModel.startTimer(newTag, newProjectId, newDescription, selectedProject?.name, selectedProject?.clientName)
                     }
