@@ -1,27 +1,22 @@
 #!/bin/bash
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TARGET="$HOME/.local/share/plasma/plasmoids/org.kde.plasma.yatt"
 
-# Install YATT KDE Plasma Widget
-
-PACKAGE_DIR="$(dirname "$0")/package"
-INSTALL_DIR="$HOME/.local/share/plasma/plasmoids/org.kde.yatt"
-
-# Remove old installation
-if [ -d "$INSTALL_DIR" ]; then
-    echo "Removing old installation..."
-    rm -rf "$INSTALL_DIR"
+echo "Checking dependencies..."
+if ! pacman -Qq qt6-websockets &>/dev/null; then
+    echo "qt6-websockets is required. Installing..."
+    sudo pacman -S --noconfirm qt6-websockets
 fi
 
-# Install
-echo "Installing to $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR"
-cp -r "$PACKAGE_DIR"/* "$INSTALL_DIR"
+echo "Installing YATT Timer widget..."
 
-echo "Done! You may need to restart Plasma or log out/in."
+rm -rf "$TARGET"
+mkdir -p "$HOME/.local/share/plasma/plasmoids"
+cp -r "$SCRIPT_DIR/package" "$TARGET"
+
+echo "Installed to $TARGET"
 echo ""
-echo "To restart Plasma (Wayland), run:"
-echo "  systemctl --user restart plasma-plasmashell"
-echo ""
-echo "Or for X11:"
-echo "  kquitapp6 plasmashell && kstart plasmashell"
-echo ""
-echo "Then right-click your panel > Add Widgets > Search for 'Time Command'"
+echo "Restart the Plasma shell to apply:"
+echo "  Wayland: systemctl --user restart plasma-plasmashell"
+echo "  X11:     kquitapp6 plasmashell && kstart plasmashell"

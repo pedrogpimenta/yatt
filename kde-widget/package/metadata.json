@@ -1,19 +1,19 @@
 {
     "KPlugin": {
-        "Id": "org.kde.yatt",
-        "Name": "Time Command",
-        "Description": "Time tracking widget — start/stop timers, see day and week totals, works offline",
-        "Icon": "icon",
         "Authors": [
             {
+                "Email": "",
                 "Name": "YATT"
             }
         ],
         "Category": "Utilities",
-        "Version": "2.0.0"
+        "Description": "Time tracker widget for YATT",
+        "Icon": "chronometer",
+        "Id": "org.kde.plasma.yatt",
+        "License": "MIT",
+        "Name": "YATT Timer",
+        "Version": "1.0"
     },
-    "X-Plasma-API": "declarativeappletscript",
-    "X-Plasma-API-Minimum-Version": "6.0",
-    "X-Plasma-MainScript": "ui/main.qml",
-    "KPackageStructure": "Plasma/Applet"
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
 }
