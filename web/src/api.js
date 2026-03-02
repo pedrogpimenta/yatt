@@ -222,6 +222,9 @@ async function attemptSync() {
         // If it's a 404, the item was deleted on server - remove from queue
         if (err.message.includes('not found')) {
           await offlineStorage.removeSyncQueueItem(operation.id)
+        } else if (operation.type === 'stop' && err.message.includes('Timer already stopped')) {
+          // Timer was already stopped (e.g. by another device/tab) - desired state achieved
+          await offlineStorage.removeSyncQueueItem(operation.id)
         }
         // Continue with other operations
       }
