@@ -3,143 +3,132 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.extras as PlasmaExtras
-import org.kde.plasma.plasmoid
 import org.kde.kirigami as Kirigami
 
 PlasmaExtras.Representation {
     id: fullRoot
 
-    property bool editingElapsed: false
-    property string editElapsedValue: ""
-    property real editStartedAt: 0
-    property bool editingStartTime: false
-    property string editStartDate: ""
-    property string editStartTime: ""
-    property bool showTagSuggestions: false
-    property bool showProjectSuggestions: false
-    property string projectSearchText: ""
+    // ── Edit states ──────────────────────────────────────────────────────────
+    property bool   editingElapsed:    false
+    property string editElapsedValue:  ""
+    property real   editStartedAt:     0
 
-    Layout.minimumWidth: Kirigami.Units.gridUnit * 14
-    Layout.minimumHeight: Kirigami.Units.gridUnit * 10
-    Layout.preferredWidth: Kirigami.Units.gridUnit * 16
-    Layout.preferredHeight: Kirigami.Units.gridUnit * 14
+    property bool   editingStartTime:  false
+    property string editStartDate:     ""
+    property string editStartHHmm:     ""
 
-    function formatStartTime(isoString) {
-        var date = new Date(isoString)
-        return "Started " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    property bool   showTagSuggestions:     false
+    property bool   showProjectSuggestions: false
+    property string projectSearchText:      ""
+
+    Layout.minimumWidth:   Kirigami.Units.gridUnit * 15
+    Layout.minimumHeight:  Kirigami.Units.gridUnit * 20
+    Layout.preferredWidth: Kirigami.Units.gridUnit * 17
+    Layout.preferredHeight: Kirigami.Units.gridUnit * 24
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function formatHHmm(ms) {
+        var totalMinutes = Math.floor(ms / 60000)
+        var h = Math.floor(totalMinutes / 60)
+        var m = totalMinutes % 60
+        return String(h).padStart(2,'0') + ":" + String(m).padStart(2,'0')
     }
 
-    function toDateString(isoString) {
-        var date = new Date(isoString)
-        var year = date.getFullYear()
-        var month = String(date.getMonth() + 1).padStart(2, '0')
-        var day = String(date.getDate()).padStart(2, '0')
-        return year + "-" + month + "-" + day
+    function toDateStr(iso) {
+        var d = new Date(iso)
+        return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,'0') + "-" + String(d.getDate()).padStart(2,'0')
     }
 
-    function toTimeString(isoString) {
-        var date = new Date(isoString)
-        var hours = String(date.getHours()).padStart(2, '0')
-        var minutes = String(date.getMinutes()).padStart(2, '0')
-        return hours + ":" + minutes
+    function toTimeStr(iso) {
+        var d = new Date(iso)
+        return String(d.getHours()).padStart(2,'0') + ":" + String(d.getMinutes()).padStart(2,'0')
     }
 
     function startEditElapsed() {
         editElapsedValue = root.formatHHmmss(root.currentElapsed)
-        editStartedAt = Date.now()
-        editingElapsed = true
-    }
-
-    function cancelEditElapsed() {
-        editingElapsed = false
+        editStartedAt    = Date.now()
+        editingElapsed   = true
     }
 
     function saveEditElapsed() {
-        var timeSinceEditStarted = Date.now() - editStartedAt
-        if (root.updateElapsedTime(editElapsedValue, timeSinceEditStarted)) {
+        if (root.updateElapsedTime(editElapsedValue, Date.now() - editStartedAt))
             editingElapsed = false
-        }
     }
 
-    function startEdit() {
-        if (root.currentTimer) {
-            editStartDate = toDateString(root.currentTimer.start_time)
-            editStartTime = toTimeString(root.currentTimer.start_time)
-            editingStartTime = true
-        }
+    function startEditStartTime() {
+        if (!root.currentTimer) return
+        editStartDate    = toDateStr(root.currentTimer.start_time)
+        editStartHHmm    = toTimeStr(root.currentTimer.start_time)
+        editingStartTime = true
     }
 
-    function cancelEdit() {
+    function saveEditStartTime() {
+        root.updateCurrentTimer({ start_time: new Date(editStartDate + "T" + editStartHHmm).toISOString() })
         editingStartTime = false
     }
 
-    function saveEdit() {
-        var newStartTime = new Date(editStartDate + "T" + editStartTime).toISOString()
-        root.updateCurrentTimer({ start_time: newStartTime })
-        editingStartTime = false
-    }
-
+    // ── Header ───────────────────────────────────────────────────────────────
     header: PlasmaExtras.PlasmoidHeading {
         RowLayout {
             anchors.fill: parent
-            
+
             PlasmaExtras.Heading {
                 Layout.fillWidth: true
                 level: 1
-                text: "YATT"
+                text: "Time Command"
             }
-            
-            // Offline/sync status indicator
+
+            // Offline / sync indicator
             RowLayout {
                 visible: !root.isOnline || root.pendingSyncCount > 0
                 spacing: Kirigami.Units.smallSpacing
-                
+
                 Kirigami.Icon {
-                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                    Layout.preferredWidth:  Kirigami.Units.iconSizes.small
                     Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                    source: root.isSyncing ? "view-refresh" : (root.isOnline ? "view-refresh" : "network-disconnect")
-                    color: root.isOnline ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.negativeTextColor
-                    
+                    source: root.isSyncing ? "view-refresh"
+                          : (root.isOnline ? "view-refresh" : "network-disconnect")
+                    color:  root.isOnline ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.negativeTextColor
+
                     RotationAnimation on rotation {
                         running: root.isSyncing
-                        from: 0
-                        to: 360
-                        duration: 1000
-                        loops: Animation.Infinite
+                        from: 0; to: 360; duration: 1000; loops: Animation.Infinite
                     }
                 }
-                
+
                 Text {
                     visible: root.pendingSyncCount > 0
-                    text: root.pendingSyncCount
+                    text:  root.pendingSyncCount
                     font.pointSize: 8
                     color: Kirigami.Theme.neutralTextColor
                 }
-                
+
                 PlasmaComponents.ToolTip {
-                    text: root.isSyncing ? "Syncing..." : 
-                          (root.isOnline ? root.pendingSyncCount + " pending" : "Offline - " + root.pendingSyncCount + " pending")
+                    text: root.isSyncing ? "Syncing…"
+                        : root.isOnline  ? root.pendingSyncCount + " pending"
+                                         : "Offline – " + root.pendingSyncCount + " pending"
                 }
             }
 
+            // Refresh / Sync button
             PlasmaComponents.ToolButton {
                 icon.name: "view-refresh"
                 onClicked: {
                     root.fetchPreferences()
-                    root.fetchTimers(true)   // force – always fetch even if loading was stuck
+                    root.fetchTimers(true)
                     root.fetchTags()
                     root.fetchProjects()
                     root.fetchClients()
-                    if (root.pendingSyncCount > 0) {
-                        root.syncWithServer(true)   // force – try sync even if widget thinks offline
-                    }
+                    if (root.pendingSyncCount > 0) root.syncWithServer(true)
                 }
-                PlasmaComponents.ToolTip { text: root.pendingSyncCount > 0 ? "Refresh & Sync" : "Refresh" }
+                PlasmaComponents.ToolTip {
+                    text: root.pendingSyncCount > 0 ? "Refresh & Sync (" + root.pendingSyncCount + " pending)" : "Refresh"
+                }
             }
 
             PlasmaComponents.ToolButton {
                 icon.name: "internet-web-browser"
-                onClicked: Qt.openUrlExternally("https://time.command.pimenta.pt")
+                onClicked: Qt.openUrlExternally(root.webAppUrl())
                 PlasmaComponents.ToolTip { text: "Open Web App" }
             }
 
@@ -151,23 +140,25 @@ PlasmaExtras.Representation {
         }
     }
 
+    // ── Body ─────────────────────────────────────────────────────────────────
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: Kirigami.Units.smallSpacing
         spacing: Kirigami.Units.largeSpacing
 
-        // Current timer display
+        // ── Current timer ────────────────────────────────────────────────────
         ColumnLayout {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
             spacing: Kirigami.Units.smallSpacing
 
-            // Elapsed time display (clickable to edit)
+            // Elapsed (click to edit)
             Text {
+                id: elapsedDisplay
                 Layout.alignment: Qt.AlignHCenter
                 visible: !fullRoot.editingElapsed
-                text: root.isRunning ? root.formatHHmmss(root.currentElapsed) : "00:00:00"
-                font.pointSize: 24
+                text:  root.isRunning ? root.formatHHmmss(root.currentElapsed) : "00:00:00"
+                font.pointSize: 26
                 font.bold: true
                 color: root.isRunning ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.disabledTextColor
 
@@ -177,9 +168,11 @@ PlasmaExtras.Representation {
                     enabled: root.isRunning
                     onClicked: fullRoot.startEditElapsed()
                 }
+
+                PlasmaComponents.ToolTip { text: "Click to edit elapsed time" }
             }
 
-            // Edit elapsed time form
+            // Elapsed edit form
             ColumnLayout {
                 Layout.fillWidth: true
                 visible: fullRoot.editingElapsed
@@ -188,12 +181,12 @@ PlasmaExtras.Representation {
                 QQC2.TextField {
                     id: elapsedField
                     Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: Kirigami.Units.gridUnit * 6
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 7
                     text: fullRoot.editElapsedValue
                     onTextChanged: fullRoot.editElapsedValue = text
                     inputMask: "99:99:99"
                     placeholderText: "HH:MM:SS"
-                    font.pointSize: 18
+                    font.pointSize: 20
                     horizontalAlignment: Text.AlignHCenter
                     onAccepted: fullRoot.saveEditElapsed()
                 }
@@ -201,24 +194,16 @@ PlasmaExtras.Representation {
                 RowLayout {
                     Layout.alignment: Qt.AlignHCenter
                     spacing: Kirigami.Units.smallSpacing
-
-                    PlasmaComponents.Button {
-                        text: "Cancel"
-                        onClicked: fullRoot.cancelEditElapsed()
-                    }
-
-                    PlasmaComponents.Button {
-                        text: "Save"
-                        onClicked: fullRoot.saveEditElapsed()
-                    }
+                    PlasmaComponents.Button { text: "Cancel"; onClicked: fullRoot.editingElapsed = false }
+                    PlasmaComponents.Button { text: "Save";   onClicked: fullRoot.saveEditElapsed() }
                 }
             }
 
-            // Start time display (clickable to edit)
+            // Start time (click to edit)
             Text {
                 Layout.alignment: Qt.AlignHCenter
                 visible: root.isRunning && root.currentTimer && !fullRoot.editingStartTime && !fullRoot.editingElapsed
-                text: root.currentTimer ? formatStartTime(root.currentTimer.start_time) : ""
+                text: root.currentTimer ? "Started " + toTimeStr(root.currentTimer.start_time) : ""
                 color: Kirigami.Theme.linkColor
                 font.underline: true
                 opacity: 0.8
@@ -226,11 +211,13 @@ PlasmaExtras.Representation {
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: fullRoot.startEdit()
+                    onClicked: fullRoot.startEditStartTime()
                 }
+
+                PlasmaComponents.ToolTip { text: "Click to edit start time" }
             }
 
-            // Edit start time form
+            // Start time edit form
             ColumnLayout {
                 Layout.fillWidth: true
                 visible: fullRoot.editingStartTime
@@ -241,7 +228,6 @@ PlasmaExtras.Representation {
                     spacing: Kirigami.Units.smallSpacing
 
                     QQC2.TextField {
-                        id: dateField
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 7
                         text: fullRoot.editStartDate
                         onTextChanged: fullRoot.editStartDate = text
@@ -250,10 +236,9 @@ PlasmaExtras.Representation {
                     }
 
                     QQC2.TextField {
-                        id: timeField
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 4
-                        text: fullRoot.editStartTime
-                        onTextChanged: fullRoot.editStartTime = text
+                        text: fullRoot.editStartHHmm
+                        onTextChanged: fullRoot.editStartHHmm = text
                         inputMask: "99:99"
                         placeholderText: "HH:MM"
                     }
@@ -262,21 +247,13 @@ PlasmaExtras.Representation {
                 RowLayout {
                     Layout.alignment: Qt.AlignHCenter
                     spacing: Kirigami.Units.smallSpacing
-
-                    PlasmaComponents.Button {
-                        text: "Cancel"
-                        onClicked: fullRoot.cancelEdit()
-                    }
-
-                    PlasmaComponents.Button {
-                        text: "Save"
-                        onClicked: fullRoot.saveEdit()
-                    }
+                    PlasmaComponents.Button { text: "Cancel"; onClicked: fullRoot.editingStartTime = false }
+                    PlasmaComponents.Button { text: "Save";   onClicked: fullRoot.saveEditStartTime() }
                 }
             }
         }
 
-        // Tag input (shown always)
+        // ── Tag input ────────────────────────────────────────────────────────
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 2
@@ -285,63 +262,52 @@ PlasmaExtras.Representation {
                 id: tagField
                 Layout.fillWidth: true
                 text: root.newTag
-                placeholderText: root.isRunning ? "Change tag..." : "Tag (optional)"
+                placeholderText: root.isRunning ? "Tag…" : "Tag (optional)"
                 horizontalAlignment: Text.AlignHCenter
                 onTextChanged: {
                     root.newTag = text
-                    fullRoot.showTagSuggestions = text.length > 0 || activeFocus
+                    fullRoot.showTagSuggestions = activeFocus
                 }
                 onAccepted: {
-                    if (root.isRunning) {
-                        root.updateRunningTag()
-                    } else {
-                        root.toggleTimer()
-                    }
+                    if (root.isRunning) root.updateRunningTag()
+                    else root.toggleTimer()
                 }
                 onActiveFocusChanged: {
-                    if (activeFocus) {
-                        fullRoot.showTagSuggestions = true
-                    } else {
-                        // Delay hiding to allow click on suggestion
-                        hideTimer.start()
-                    }
+                    if (activeFocus) fullRoot.showTagSuggestions = true
+                    else tagHideTimer.start()
                 }
             }
 
             Timer {
-                id: hideTimer
+                id: tagHideTimer
                 interval: 150
                 onTriggered: fullRoot.showTagSuggestions = false
             }
 
-            // Tag suggestions
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: suggestionsColumn.height
-                visible: fullRoot.showTagSuggestions && root.availableTags.length > 0
+                Layout.preferredHeight: tagSuggestions.implicitHeight
+                visible: fullRoot.showTagSuggestions && root.getFilteredTags(root.newTag).length > 0
                 color: Kirigami.Theme.backgroundColor
                 border.color: Kirigami.Theme.disabledTextColor
                 border.width: 1
-                radius: Kirigami.Units.smallSpacing
+                radius: 4
 
                 ColumnLayout {
-                    id: suggestionsColumn
+                    id: tagSuggestions
                     width: parent.width
                     spacing: 0
 
                     Repeater {
                         model: root.getFilteredTags(root.newTag)
-
                         delegate: QQC2.ItemDelegate {
                             Layout.fillWidth: true
                             text: modelData
                             onClicked: {
-                                root.newTag = modelData
+                                root.newTag  = modelData
                                 tagField.text = modelData
                                 fullRoot.showTagSuggestions = false
-                                if (root.isRunning) {
-                                    root.updateRunningTag()
-                                }
+                                if (root.isRunning) root.updateRunningTag()
                                 tagField.forceActiveFocus()
                             }
                         }
@@ -350,7 +316,7 @@ PlasmaExtras.Representation {
             }
         }
 
-        // Project selector (select only – no add/edit)
+        // ── Project input ────────────────────────────────────────────────────
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 2
@@ -358,8 +324,12 @@ PlasmaExtras.Representation {
             QQC2.TextField {
                 id: projectField
                 Layout.fillWidth: true
-                text: activeFocus ? fullRoot.projectSearchText : (root.findProjectById(root.newProjectId) ? root.formatProjectLabel(root.findProjectById(root.newProjectId)) : "")
-                placeholderText: "Project (optional) – type to search"
+                text: activeFocus
+                    ? fullRoot.projectSearchText
+                    : (root.findProjectById(root.newProjectId)
+                       ? root.formatProjectLabel(root.findProjectById(root.newProjectId))
+                       : "")
+                placeholderText: "Project (optional)"
                 horizontalAlignment: Text.AlignHCenter
                 onTextChanged: {
                     if (activeFocus) {
@@ -385,129 +355,93 @@ PlasmaExtras.Representation {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(projectSuggestionsColumn.height, Kirigami.Units.gridUnit * 8)
+                Layout.preferredHeight: Math.min(projectSuggestions.implicitHeight, Kirigami.Units.gridUnit * 8)
                 Layout.maximumHeight: Kirigami.Units.gridUnit * 8
-                visible: fullRoot.showProjectSuggestions && (root.availableProjects.length > 0 || fullRoot.projectSearchText.length > 0)
+                visible: fullRoot.showProjectSuggestions
+                clip: true
                 color: Kirigami.Theme.backgroundColor
                 border.color: Kirigami.Theme.disabledTextColor
                 border.width: 1
-                radius: Kirigami.Units.smallSpacing
+                radius: 4
 
-                ColumnLayout {
-                    id: projectSuggestionsColumn
-                    width: parent.width
-                    spacing: 0
+                Flickable {
+                    anchors.fill: parent
+                    contentHeight: projectSuggestions.implicitHeight
+                    clip: true
 
-                    Repeater {
-                        model: root.getFilteredProjects(fullRoot.projectSearchText)
+                    ColumnLayout {
+                        id: projectSuggestions
+                        width: parent.width
+                        spacing: 0
 
-                        delegate: QQC2.ItemDelegate {
-                            Layout.fillWidth: true
-                            text: modelData ? modelData.label : ""
-                            onClicked: {
-                                if (modelData) {
-                                    root.newProjectId = modelData.id
-                                    if (root.isRunning) {
-                                        root.updateRunningProject()
+                        Repeater {
+                            model: root.getFilteredProjects(fullRoot.projectSearchText)
+                            delegate: QQC2.ItemDelegate {
+                                Layout.fillWidth: true
+                                text: modelData ? modelData.label : ""
+                                onClicked: {
+                                    if (modelData) {
+                                        root.newProjectId = modelData.id
+                                        if (root.isRunning) root.updateRunningProject()
                                     }
+                                    fullRoot.projectSearchText = ""
+                                    fullRoot.showProjectSuggestions = false
+                                    projectField.focus = false
                                 }
+                            }
+                        }
+
+                        QQC2.ItemDelegate {
+                            Layout.fillWidth: true
+                            text: "— No project —"
+                            onClicked: {
+                                root.newProjectId = null
+                                if (root.isRunning) root.updateRunningProject()
                                 fullRoot.projectSearchText = ""
                                 fullRoot.showProjectSuggestions = false
                                 projectField.focus = false
                             }
                         }
                     }
-
-                    QQC2.ItemDelegate {
-                        Layout.fillWidth: true
-                        text: "— No project —"
-                        onClicked: {
-                            root.newProjectId = null
-                            if (root.isRunning) {
-                                root.updateRunningProject()
-                            }
-                            fullRoot.projectSearchText = ""
-                            fullRoot.showProjectSuggestions = false
-                            projectField.focus = false
-                        }
-                    }
                 }
             }
         }
 
-        // Description input
-        ColumnLayout {
+        // ── Description input ────────────────────────────────────────────────
+        QQC2.TextField {
+            id: descriptionField
             Layout.fillWidth: true
-            spacing: 2
-
-            QQC2.TextField {
-                id: descriptionField
-                Layout.fillWidth: true
-                text: root.newDescription
-                placeholderText: root.isRunning ? "Change description..." : "Description (optional)"
-                horizontalAlignment: Text.AlignHCenter
-                onTextChanged: root.newDescription = text
-                onEditingFinished: {
-                    if (root.isRunning) {
-                        root.updateRunningDescription()
-                    }
-                }
-            }
-        }
-
-        // Current project/type/client when running (read-only)
-        Text {
-            Layout.alignment: Qt.AlignHCenter
-            visible: root.isRunning && root.currentTimer && root.findProjectById(root.currentTimer.project_id)
-            text: root.findProjectById(root.currentTimer ? root.currentTimer.project_id : null) ? root.formatProjectLabel(root.findProjectById(root.currentTimer.project_id)) : ""
-            font.pointSize: 8
-            color: Kirigami.Theme.disabledTextColor
-        }
-
-        // Current description when running
-        Text {
-            Layout.alignment: Qt.AlignHCenter
-            visible: root.isRunning && root.currentTimer && root.currentTimer.description
-            text: root.currentTimer ? root.currentTimer.description : ""
-            font.pointSize: 8
-            color: Kirigami.Theme.disabledTextColor
-            wrapMode: Text.WordWrap
-            Layout.maximumWidth: fullRoot.width - Kirigami.Units.gridUnit * 2
+            text: root.newDescription
+            placeholderText: root.isRunning ? "Description…" : "Description (optional)"
             horizontalAlignment: Text.AlignHCenter
+            onTextChanged: root.newDescription = text
+            onEditingFinished: { if (root.isRunning) root.updateRunningDescription() }
         }
 
-        // Start/Stop button
+        // ── Start / Stop button ──────────────────────────────────────────────
         PlasmaComponents.Button {
             Layout.fillWidth: true
             Layout.preferredHeight: Kirigami.Units.gridUnit * 2.5
-            text: root.isRunning ? "Stop" : "Start"
+            text: root.isRunning ? "Stop Timer" : "Start Timer"
             icon.name: root.isRunning ? "media-playback-stop" : "media-playback-start"
             onClicked: root.toggleTimer()
         }
 
-        // Day starts at (read-only – from preferences)
-        Text {
-            Layout.alignment: Qt.AlignHCenter
-            visible: root.dayStartHour > 0
-            text: "Day starts at " + String(root.dayStartHour).padStart(2, '0') + ":00"
-            font.pointSize: 8
-            color: Kirigami.Theme.disabledTextColor
-        }
-
-        // Stats
+        // ── Day / Week totals ────────────────────────────────────────────────
         GridLayout {
             Layout.fillWidth: true
             columns: 2
-            rowSpacing: Kirigami.Units.smallSpacing
-            columnSpacing: Kirigami.Units.largeSpacing
+            rowSpacing:    Kirigami.Units.smallSpacing
+            columnSpacing: Kirigami.Units.smallSpacing
 
+            // Today
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: Kirigami.Units.gridUnit * (root.dailyGoalEnabled && root.todayRemainingMs >= 0 ? 3.5 : 3)
+                Layout.preferredHeight: Kirigami.Units.gridUnit * (root.dailyGoalEnabled && root.todayRemainingMs >= 0 ? 4 : 3)
                 color: Kirigami.Theme.backgroundColor
                 border.color: Kirigami.Theme.disabledTextColor
                 border.width: 1
-                radius: Kirigami.Units.smallSpacing
+                radius: 6
 
                 ColumnLayout {
                     anchors.centerIn: parent
@@ -516,34 +450,40 @@ PlasmaExtras.Representation {
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         text: "TODAY"
-                        font.pointSize: 8
+                        font.pointSize: 7
                         font.bold: true
+                        font.letterSpacing: 1
                         color: Kirigami.Theme.disabledTextColor
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         text: root.formatDuration(root.todayTotal)
-                        font.pointSize: 12
+                        font.pointSize: 14
+                        font.bold: true
                         color: Kirigami.Theme.textColor
                     }
-                    // Time goal (read-only)
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         visible: root.dailyGoalEnabled && root.todayRemainingMs >= 0
-                        text: root.todayRemainingMs > 0 ? root.formatDuration(root.todayRemainingMs) + " left" : "goal reached"
-                        font.pointSize: 9
-                        color: root.todayRemainingMs > 0 ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.positiveTextColor
+                        text: root.todayRemainingMs > 0
+                            ? root.formatDuration(root.todayRemainingMs) + " left"
+                            : "✓ goal reached"
+                        font.pointSize: 8
+                        color: root.todayRemainingMs > 0
+                            ? Kirigami.Theme.neutralTextColor
+                            : Kirigami.Theme.positiveTextColor
                     }
                 }
             }
 
+            // This week
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: Kirigami.Units.gridUnit * (root.dailyGoalEnabled && root.weekRemainingMs >= 0 ? 3.5 : 3)
+                Layout.preferredHeight: Kirigami.Units.gridUnit * (root.dailyGoalEnabled && root.weekRemainingMs >= 0 ? 4 : 3)
                 color: Kirigami.Theme.backgroundColor
                 border.color: Kirigami.Theme.disabledTextColor
                 border.width: 1
-                radius: Kirigami.Units.smallSpacing
+                radius: 6
 
                 ColumnLayout {
                     anchors.centerIn: parent
@@ -552,57 +492,69 @@ PlasmaExtras.Representation {
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         text: "THIS WEEK"
-                        font.pointSize: 8
+                        font.pointSize: 7
                         font.bold: true
+                        font.letterSpacing: 1
                         color: Kirigami.Theme.disabledTextColor
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         text: root.formatDuration(root.weekTotal)
-                        font.pointSize: 12
+                        font.pointSize: 14
+                        font.bold: true
                         color: Kirigami.Theme.textColor
                     }
-                    // Time goal (read-only)
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         visible: root.dailyGoalEnabled && root.weekRemainingMs >= 0
-                        text: root.weekRemainingMs > 0 ? root.formatDuration(root.weekRemainingMs) + " left" : "goal reached"
-                        font.pointSize: 9
-                        color: root.weekRemainingMs > 0 ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.positiveTextColor
+                        text: root.weekRemainingMs > 0
+                            ? root.formatDuration(root.weekRemainingMs) + " left"
+                            : "✓ goal reached"
+                        font.pointSize: 8
+                        color: root.weekRemainingMs > 0
+                            ? Kirigami.Theme.neutralTextColor
+                            : Kirigami.Theme.positiveTextColor
                     }
                 }
             }
         }
 
-        // No token warning
+        // Day-start note
+        Text {
+            Layout.alignment: Qt.AlignHCenter
+            visible: root.dayStartHour > 0
+            text: "Day starts at " + String(root.dayStartHour).padStart(2,'0') + ":00"
+            font.pointSize: 8
+            color: Kirigami.Theme.disabledTextColor
+        }
+
+        // ── Status / warnings ────────────────────────────────────────────────
         PlasmaExtras.Heading {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
-            visible: !root.token
+            visible: !root.apiKey
             level: 4
-            text: "Configure API URL and token in settings"
+            text: "Configure your API URL and API Key in settings"
             color: Kirigami.Theme.neutralTextColor
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
         }
 
-        // Connection status info
         PlasmaExtras.Heading {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
-            visible: root.token && !root.isOnline
+            visible: !!root.apiKey && !root.isOnline
             level: 4
-            text: "Offline mode - changes will sync when connected"
+            text: "Offline – changes will sync when connected"
             color: Kirigami.Theme.neutralTextColor
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
         }
-        
-        // Connection error warning (for non-offline errors)
+
         PlasmaExtras.Heading {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
-            visible: root.token && root.lastApiError !== "" && root.lastApiError !== "Offline mode"
+            visible: !!root.apiKey && root.lastApiError !== "" && root.lastApiError !== "Offline"
             level: 4
             text: root.lastApiError
             color: Kirigami.Theme.negativeTextColor

@@ -5,8 +5,12 @@
                           http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
     <kcfgfile name=""/>
     <group name="General">
-        <entry name="token" type="String">
-            <label>Authentication Token</label>
+        <entry name="apiUrl" type="String">
+            <label>API URL</label>
+            <default>https://time.command.pimenta.pt/api</default>
+        </entry>
+        <entry name="apiKey" type="String">
+            <label>API Key</label>
             <default></default>
         </entry>
     </group>
