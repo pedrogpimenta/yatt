@@ -1099,7 +1099,10 @@ onUnmounted(() => {
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="sidebar-header">
-        <h1 class="logo">Time Command</h1>
+        <h1 class="logo">
+          <img src="/favicon.png" alt="" class="logo-icon" />
+          Time Command
+        </h1>
         <div class="header-actions">
           <!-- Offline/Sync indicator -->
           <div class="sync-status" :class="{ offline: !isOnline, syncing: syncing }">
@@ -1631,9 +1634,18 @@ onUnmounted(() => {
 }
 
 .logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   font-size: 1.5rem;
   font-weight: 700;
   color: var(--accent-color);
+}
+
+.logo-icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  object-fit: contain;
 }
 
 .header-actions {

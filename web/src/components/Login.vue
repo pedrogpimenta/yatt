@@ -34,6 +34,10 @@ function useWithoutAccount() {
 
 <template>
   <div class="login">
+    <div class="app-title">
+      <img src="/favicon.png" alt="" class="app-title-icon" />
+      Time Command
+    </div>
     <h2>{{ isRegistering ? 'Create Account' : 'Sign In' }}</h2>
     
     <form @submit.prevent="handleSubmit">
@@ -105,14 +109,21 @@ h2 {
   font-size: 1.5rem;
 }
 
-.login::before {
-  content: 'Time Command';
-  display: block;
-  text-align: center;
+.app-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
   font-size: 2.5rem;
   font-weight: 700;
   color: var(--accent-color);
   margin-bottom: 2rem;
+}
+
+.app-title-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  object-fit: contain;
 }
 
 form {

@@ -3,7 +3,7 @@
         "Id": "org.kde.yatt",
         "Name": "Time Command",
         "Description": "Time tracking widget — start/stop timers, see day and week totals, works offline",
-        "Icon": "chronometer",
+        "Icon": "icon",
         "Authors": [
             {
                 "Name": "YATT"
