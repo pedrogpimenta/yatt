@@ -2,9 +2,13 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../db');
-const { JWT_SECRET, authMiddleware } = require('../middleware/auth');
+const { JWT_SECRET, JWT_EXPIRES_IN, authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
+
+function signAuthToken(userId) {
+  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+}
 
 function normalizeDayStartHour(value) {
   if (value === null || value === undefined || value === '') {
@@ -38,7 +42,7 @@ router.post('/register', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = db.prepare('INSERT INTO users (email, password) VALUES (?, ?)').run(email, hashedPassword);
 
-    const token = jwt.sign({ userId: result.lastInsertRowid }, JWT_SECRET, { expiresIn: '7d' });
+    const token = signAuthToken(result.lastInsertRowid);
 
     res.status(201).json({ token, userId: result.lastInsertRowid });
   } catch (err) {
@@ -66,7 +70,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
+    const token = signAuthToken(user.id);
 
     res.json({ token, userId: user.id });
   } catch (err) {

@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret-in-production';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '30d';
 
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -20,4 +21,4 @@ function authMiddleware(req, res, next) {
   }
 }
 
-module.exports = { authMiddleware, JWT_SECRET };
+module.exports = { authMiddleware, JWT_SECRET, JWT_EXPIRES_IN };

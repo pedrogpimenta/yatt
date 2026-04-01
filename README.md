@@ -78,6 +78,7 @@ nano .env
 
 ```env
 JWT_SECRET=your-very-long-and-secure-random-string-here
+JWT_EXPIRES_IN=30d
 ```
 
 #### 2. Build and Run
@@ -293,6 +294,7 @@ endTime=<ISO 8601 or empty>
 | Variable | Default | Description |
 |----------|---------|-------------|
 | JWT_SECRET | (required) | Secret key for JWT signing |
+| JWT_EXPIRES_IN | 30d | Auth token lifespan (for example `7d`, `30d`, `12h`) |
 | PORT | 3000 | API server port |
 | DB_PATH | ./data/yatt.db | SQLite database path |
 | FCM_ENABLED | true | Set to false to disable FCM |
