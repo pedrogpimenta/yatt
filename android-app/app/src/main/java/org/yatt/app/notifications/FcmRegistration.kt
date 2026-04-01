@@ -1,6 +1,8 @@
 package org.yatt.app.notifications
 
+import android.content.Context
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -15,9 +17,12 @@ import org.yatt.app.data.remote.ApiService
  * timer push notifications (e.g. when a timer is started or stopped on another device).
  */
 class FcmRegistration(
+    context: Context,
     private val apiService: ApiService,
     private val settingsStore: SettingsStore
 ) {
+    private val appContext = context.applicationContext
+
     suspend fun getToken(): String? = withContext(Dispatchers.IO) {
         runCatching { FirebaseMessaging.getInstance().token.await() }.getOrNull()
     }
@@ -26,6 +31,11 @@ class FcmRegistration(
         val authToken = settingsStore.authTokenFlow.first()
         if (authToken.isNullOrBlank()) {
             Log.w(TAG, "FCM register skipped: no auth token")
+            return@withContext false
+        }
+        if (!NotificationManagerCompat.from(appContext).areNotificationsEnabled()) {
+            Log.w(TAG, "FCM register skipped: notifications disabled; unregistering stale token if needed")
+            unregisterCurrentToken()
             return@withContext false
         }
         val fcmToken = getToken()
@@ -44,15 +54,20 @@ class FcmRegistration(
     }
 
     suspend fun unregisterFromApi(): Boolean = withContext(Dispatchers.IO) {
+        unregisterCurrentToken()
+    }
+
+    private suspend fun unregisterCurrentToken(): Boolean {
         val authToken = settingsStore.authTokenFlow.first()
-        if (authToken.isNullOrBlank()) return@withContext false
-        val fcmToken = getToken() ?: return@withContext false
+        if (authToken.isNullOrBlank()) return false
+        val fcmToken = getToken() ?: return false
         try {
             apiService.unregisterDeviceToken(fcmToken)
-            true
+            Log.d(TAG, "FCM token unregistered from API")
+            return true
         } catch (e: ApiException) {
             Log.e(TAG, "FCM unregister failed: ${e.message}")
-            false
+            return false
         }
     }
 

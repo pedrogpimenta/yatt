@@ -22,9 +22,11 @@ data class TimerUiState(
     val timers: List<TimerEntity> = emptyList(),
     val tags: List<String> = emptyList(),
     val isOnline: Boolean = true,
+    val isLocalMode: Boolean = false,
     val pendingSyncCount: Int = 0,
     val syncing: Boolean = false,
     val loading: Boolean = true,
+    val lastRefreshAtMillis: Long? = null,
     val error: String? = null
 )
 
@@ -35,6 +37,7 @@ class TimerViewModel(
 ) : ViewModel() {
     private val webSocket = TimerWebSocket(settingsStore) {
         refreshTimers()
+        refreshTags()
     }
     val preferencesFlow = settingsStore.preferencesFlow
     val localModeFlow = settingsStore.localModeFlow
@@ -43,6 +46,7 @@ class TimerViewModel(
     private val loading = MutableStateFlow(true)
     private val error = MutableStateFlow<String?>(null)
     private val syncing = MutableStateFlow(false)
+    private val lastRefreshAtMillis = MutableStateFlow<Long?>(null)
     private val dailyGoals = MutableStateFlow<Map<String, Double>>(emptyMap())
     val dailyGoalsFlow: StateFlow<Map<String, Double>> = dailyGoals
 
@@ -50,8 +54,8 @@ class TimerViewModel(
         val timers: List<TimerEntity>,
         val tags: List<String>,
         val isOnline: Boolean,
-        val pendingSyncCount: Int,
-        val syncing: Boolean
+        val isLocalMode: Boolean,
+        val pendingSyncCount: Int
     )
 
     val uiState: StateFlow<TimerUiState> = combine(
@@ -59,28 +63,30 @@ class TimerViewModel(
             timerRepository.timersFlow,
             tags,
             timerRepository.isOnlineFlow,
-            timerRepository.pendingSyncCountFlow,
-            syncing
-        ) { timers, tags, isOnline, pendingSyncCount, syncing ->
-            _Combined(timers, tags, isOnline, pendingSyncCount, syncing)
+            settingsStore.localModeFlow,
+            timerRepository.pendingSyncCountFlow
+        ) { timers, tags, isOnline, localMode, pendingSyncCount ->
+            _Combined(timers, tags, isOnline, localMode, pendingSyncCount)
         },
+        syncing,
+        lastRefreshAtMillis,
         loading,
         error
-    ) { combined, loading, error ->
+    ) { combined, syncing, lastRefreshAtMillis, loading, error ->
         TimerUiState(
             timers = combined.timers,
             tags = combined.tags,
             isOnline = combined.isOnline,
+            isLocalMode = combined.isLocalMode,
             pendingSyncCount = combined.pendingSyncCount,
-            syncing = combined.syncing,
+            syncing = syncing,
             loading = loading,
+            lastRefreshAtMillis = lastRefreshAtMillis,
             error = error
         )
     }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, TimerUiState())
 
     init {
-        refreshTimers()
-        refreshTags()
         viewModelScope.launch {
             timerRepository.isOnlineFlow.collect { online ->
                 if (online) {
@@ -96,6 +102,15 @@ class TimerViewModel(
                     webSocket.connect()
                 } else {
                     webSocket.disconnect()
+                }
+
+                if (local || !token.isNullOrBlank()) {
+                    refreshState()
+                } else {
+                    tags.value = emptyList()
+                    dailyGoals.value = emptyMap()
+                    lastRefreshAtMillis.value = null
+                    loading.value = false
                 }
             }
         }
@@ -119,17 +134,52 @@ class TimerViewModel(
 
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
+    private fun markTimerStateFresh() {
+        lastRefreshAtMillis.value = System.currentTimeMillis()
+    }
+
+    private suspend fun refreshTimerData() {
+        timerRepository.refreshTimers()
+        markTimerStateFresh()
+    }
+
+    fun refreshState() {
+        viewModelScope.launch {
+            loading.value = true
+            error.value = null
+            try {
+                refreshTimerData()
+                tags.value = timerRepository.getTags()
+                projectsRepository.refreshProjects()
+                val prefs = settingsStore.preferencesFlow.first()
+                if (prefs.dailyGoalEnabled) {
+                    dailyGoals.value = loadDailyGoals(prefs.dayStartHour)
+                } else {
+                    dailyGoals.value = emptyMap()
+                }
+            } catch (ex: Exception) {
+                error.value = ex.message
+            } finally {
+                loading.value = false
+            }
+        }
+    }
+
+    private suspend fun loadDailyGoals(dayStartHour: Int): Map<String, Double> {
+        return try {
+            val zoneId = java.time.ZoneId.systemDefault()
+            val weekStart = TimeUtils.effectiveWeekStart(dayStartHour)
+            val from = weekStart.atZone(zoneId).toLocalDate().format(dateFormatter)
+            val to = weekStart.plus(java.time.Duration.ofDays(6)).atZone(zoneId).toLocalDate().format(dateFormatter)
+            timerRepository.getDailyGoals(from, to)
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
     fun fetchDailyGoals(dayStartHour: Int) {
         viewModelScope.launch {
-            try {
-                val zoneId = java.time.ZoneId.systemDefault()
-                val weekStart = TimeUtils.effectiveWeekStart(dayStartHour)
-                val from = weekStart.atZone(zoneId).toLocalDate().format(dateFormatter)
-                val to = weekStart.plus(java.time.Duration.ofDays(6)).atZone(zoneId).toLocalDate().format(dateFormatter)
-                dailyGoals.value = timerRepository.getDailyGoals(from, to)
-            } catch (_: Exception) {
-                dailyGoals.value = emptyMap()
-            }
+            dailyGoals.value = loadDailyGoals(dayStartHour)
         }
     }
 
@@ -156,7 +206,7 @@ class TimerViewModel(
             loading.value = true
             error.value = null
             try {
-                timerRepository.refreshTimers()
+                refreshTimerData()
             } catch (ex: Exception) {
                 error.value = ex.message
             } finally {
@@ -196,6 +246,7 @@ class TimerViewModel(
                     projectName = projectName,
                     clientName = clientName
                 )
+                markTimerStateFresh()
                 refreshTags()
             } catch (ex: Exception) {
                 error.value = ex.message
@@ -210,6 +261,7 @@ class TimerViewModel(
                 val sanitizedTag = tag?.trim()?.ifBlank { null }
                 val sanitizedDesc = description?.trim()?.takeIf { it.isNotBlank() }
                 timerRepository.updateTimer(timerId, null, null, sanitizedTag, sanitizedDesc, projectId)
+                markTimerStateFresh()
                 refreshTags()
             } catch (ex: Exception) {
                 error.value = ex.message
@@ -222,6 +274,7 @@ class TimerViewModel(
             error.value = null
             try {
                 timerRepository.stopTimer(timerId)
+                markTimerStateFresh()
             } catch (ex: Exception) {
                 error.value = ex.message
             }
@@ -237,6 +290,7 @@ class TimerViewModel(
                 val sanitizedDesc = description?.trim()?.takeIf { it.isNotBlank() }
                 timerRepository.updateTimer(timerId, null, null, sanitizedTag, sanitizedDesc, projectId)
                 timerRepository.stopTimer(timerId)
+                markTimerStateFresh()
                 refreshTags()
             } catch (ex: Exception) {
                 error.value = ex.message
@@ -249,6 +303,7 @@ class TimerViewModel(
             error.value = null
             try {
                 timerRepository.updateTimer(id, startTime, endTime, tag, description, projectId)
+                markTimerStateFresh()
                 refreshTags()
             } catch (ex: Exception) {
                 error.value = ex.message
@@ -261,6 +316,7 @@ class TimerViewModel(
             error.value = null
             try {
                 timerRepository.deleteTimer(id)
+                markTimerStateFresh()
                 refreshTags()
             } catch (ex: Exception) {
                 error.value = ex.message
@@ -281,6 +337,7 @@ class TimerViewModel(
                     projectName = projectName,
                     clientName = clientName
                 )
+                markTimerStateFresh()
                 refreshTags()
             } catch (ex: Exception) {
                 error.value = ex.message
@@ -293,6 +350,7 @@ class TimerViewModel(
             error.value = null
             try {
                 timerRepository.updateTimer(timerId, newStart.toString(), null, null)
+                markTimerStateFresh()
             } catch (ex: Exception) {
                 error.value = ex.message
             }
@@ -311,8 +369,7 @@ class TimerViewModel(
             try {
                 val synced = timerRepository.attemptSync()
                 if (synced > 0) {
-                    refreshTimers()
-                    refreshTags()
+                    refreshState()
                 }
             } catch (ex: Exception) {
                 error.value = ex.message

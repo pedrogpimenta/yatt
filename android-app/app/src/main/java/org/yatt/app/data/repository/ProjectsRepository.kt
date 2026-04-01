@@ -37,6 +37,7 @@ class ProjectsRepository(
 
     suspend fun refreshProjects() = withContext(Dispatchers.IO) {
         if (settingsStore.localModeFlow.first()) return@withContext
+        if (!hasAuthToken()) return@withContext
         try {
             val list = apiService.getProjects()
             apiProjectsState.value = list.map { it.toItem() }
@@ -48,6 +49,8 @@ class ProjectsRepository(
     suspend fun getProjects(): List<ProjectItem> = withContext(Dispatchers.IO) {
         if (settingsStore.localModeFlow.first()) {
             projectDao.getAll().map { it.toItem() }
+        } else if (!hasAuthToken()) {
+            apiProjectsState.value
         } else {
             try {
                 apiService.getProjects().map { it.toItem() }
@@ -102,6 +105,8 @@ class ProjectsRepository(
         type = type,
         clientName = clientName
     )
+
+    private suspend fun hasAuthToken(): Boolean = !settingsStore.authTokenFlow.first().isNullOrBlank()
 
     private fun ProjectItem.toEntity() = ProjectEntity(id = id, name = name, type = type, clientName = clientName)
 }

@@ -25,18 +25,28 @@ class TimerWebSocket(
 
     private var webSocket: WebSocket? = null
     private var reconnectJob: Job? = null
+    private var shouldReconnect = false
+    private var suppressReconnectOnce = false
 
     suspend fun connect() {
         val token = settingsStore.authTokenFlow.first() ?: return
+        shouldReconnect = true
+        reconnectJob?.cancel()
+        reconnectJob = null
         val baseUrl = ApiService.BASE_URL
         val wsUrl = baseUrl.replaceFirst("http", "ws").trimEnd('/')
         val request = Request.Builder()
             .url(wsUrl)
             .build()
 
-        webSocket?.close(1000, null)
+        if (webSocket != null) {
+            suppressReconnectOnce = true
+            webSocket?.close(1000, null)
+        }
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                reconnectJob?.cancel()
+                reconnectJob = null
                 val authPayload = JSONObject()
                     .put("type", "auth")
                     .put("token", token)
@@ -54,20 +64,34 @@ class TimerWebSocket(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                scheduleReconnect()
+                handleSocketEnded()
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
-                scheduleReconnect()
+                handleSocketEnded()
             }
         })
     }
 
     fun disconnect() {
+        shouldReconnect = false
         reconnectJob?.cancel()
         reconnectJob = null
-        webSocket?.close(1000, null)
+        if (webSocket != null) {
+            suppressReconnectOnce = true
+            webSocket?.close(1000, null)
+        }
         webSocket = null
+    }
+
+    private fun handleSocketEnded() {
+        if (suppressReconnectOnce) {
+            suppressReconnectOnce = false
+            return
+        }
+        if (shouldReconnect) {
+            scheduleReconnect()
+        }
     }
 
     private fun scheduleReconnect() {

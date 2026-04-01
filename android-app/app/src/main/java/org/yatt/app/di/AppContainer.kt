@@ -20,7 +20,7 @@ class AppContainer(context: Context) {
     val apiService = ApiService(settingsStore)
     val connectivityObserver = ConnectivityObserver(appContext)
     val notificationController = NotificationController(appContext)
-    val fcmRegistration = FcmRegistration(apiService, settingsStore)
+    val fcmRegistration = FcmRegistration(appContext, apiService, settingsStore)
 
     val authRepository = AuthRepository(apiService, settingsStore)
     val timerRepository = TimerRepository(

@@ -38,6 +38,7 @@ class TimerRepository(
 
     suspend fun refreshTimers() = withContext(Dispatchers.IO) {
         if (isLocalMode()) return@withContext
+        if (!hasAuthToken()) return@withContext
         if (!isOnline()) return@withContext
         // Sync pending queue first so server has latest before we fetch
         if (syncQueueDao.getCount() > 0) {
@@ -50,7 +51,7 @@ class TimerRepository(
     }
 
     suspend fun getTags(): List<String> = withContext(Dispatchers.IO) {
-        if (isLocalMode() || !isOnline()) {
+        if (isLocalMode() || !hasAuthToken() || !isOnline()) {
             return@withContext timerDao.getTagUsage().map { it.tag }
         }
         return@withContext apiService.getTags()
@@ -428,6 +429,8 @@ class TimerRepository(
 
     private suspend fun isLocalMode(): Boolean = settingsStore.localModeFlow.first()
 
+    private suspend fun hasAuthToken(): Boolean = !settingsStore.authTokenFlow.first().isNullOrBlank()
+
     private suspend fun isOnline(): Boolean = connectivityObserver.isOnline.first()
 
     /** Run on Main so Context (startForegroundService/stopService) is not called from background. */
@@ -464,10 +467,43 @@ class TimerRepository(
 
     /** Call when timer list changes to keep ongoing notification in sync (e.g. after app start or refresh). */
     suspend fun syncNotificationWithRunningTimer(timers: List<TimerEntity>, dayStartHour: Int) {
+        syncNotificationWithRunningTimer(
+            timers = timers,
+            dayStartHour = dayStartHour,
+            allowForegroundServiceStart = notificationController.canStartForegroundServiceNow()
+        )
+    }
+
+    suspend fun syncNotificationFromLocalState(
+        allowForegroundServiceStart: Boolean = notificationController.canStartForegroundServiceNow()
+    ) {
+        val timers = timerDao.getTimers()
+        val dayStartHour = settingsStore.preferencesFlow.first().dayStartHour
+        syncNotificationWithRunningTimer(timers, dayStartHour, allowForegroundServiceStart)
+    }
+
+    suspend fun refreshTimersAndSyncNotification(
+        allowForegroundServiceStart: Boolean = notificationController.canStartForegroundServiceNow()
+    ) {
+        refreshTimers()
+        syncNotificationFromLocalState(allowForegroundServiceStart)
+    }
+
+    private suspend fun syncNotificationWithRunningTimer(
+        timers: List<TimerEntity>,
+        dayStartHour: Int,
+        allowForegroundServiceStart: Boolean
+    ) {
         val running = timers.firstOrNull { it.endTime == null }
         if (running != null) {
             val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, running.id)
-            runOnMain { notificationController.startTimer(running, totalWithout) }
+            runOnMain {
+                notificationController.syncRunningTimerNotification(
+                    timer = running,
+                    totalTodaySecondsWithoutCurrent = totalWithout,
+                    allowForegroundServiceStart = allowForegroundServiceStart
+                )
+            }
         } else {
             runOnMain { notificationController.stopTimer() }
         }
@@ -496,16 +532,16 @@ class TimerRepository(
     }
 
     suspend fun getDailyGoals(from: String, to: String): Map<String, Double> = withContext(Dispatchers.IO) {
-        if (isLocalMode()) return@withContext emptyMap()
+        if (isLocalMode() || !hasAuthToken()) return@withContext emptyMap()
         runCatching { apiService.getDailyGoals(from, to) }.getOrElse { emptyMap() }
     }
 
     suspend fun setDailyGoal(date: String, hours: Double) = withContext(Dispatchers.IO) {
-        if (!isLocalMode() && isOnline()) apiService.setDailyGoal(date, hours)
+        if (!isLocalMode() && hasAuthToken() && isOnline()) apiService.setDailyGoal(date, hours)
     }
 
     suspend fun clearDailyGoal(date: String) = withContext(Dispatchers.IO) {
-        if (!isLocalMode() && isOnline()) apiService.clearDailyGoal(date)
+        if (!isLocalMode() && hasAuthToken() && isOnline()) apiService.clearDailyGoal(date)
     }
 
     object SyncType {

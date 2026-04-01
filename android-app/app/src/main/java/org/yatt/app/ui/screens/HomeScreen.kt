@@ -1,6 +1,7 @@
 package org.yatt.app.ui.screens
 
 import android.app.TimePickerDialog
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +55,7 @@ import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Today
 import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -65,9 +67,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import org.yatt.app.R
 import org.yatt.app.data.UserPreferences
 import org.yatt.app.data.local.TimerEntity
 import org.yatt.app.data.model.ProjectItem
@@ -107,7 +114,7 @@ fun HomeScreen(
     var newTag by remember { mutableStateOf("") }
     var newProjectId by remember { mutableStateOf<String?>(null) }
     var newDescription by remember { mutableStateOf("") }
-    var selectedTimer by remember { mutableStateOf<TimerEntity?>(null) }
+    var selectedTimerId by remember { mutableStateOf<String?>(null) }
     var showManualEntry by remember { mutableStateOf(false) }
     var showEditElapsed by remember { mutableStateOf(false) }
     var elapsedInput by remember { mutableStateOf("") }
@@ -117,8 +124,30 @@ fun HomeScreen(
     val dailyGoalsList by timerViewModel.dailyGoalsFlow.collectAsState(initial = emptyMap())
 
     val runningTimer = uiState.timers.firstOrNull { it.endTime == null }
+    val selectedTimer = remember(selectedTimerId, uiState.timers) {
+        selectedTimerId?.let { id -> uiState.timers.find { it.id == id } }
+    }
     var now by remember { mutableStateOf(Instant.now()) }
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                timerViewModel.refreshState()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(selectedTimerId, selectedTimer) {
+        if (selectedTimerId != null && selectedTimer == null) {
+            selectedTimerId = null
+        }
+    }
 
     LaunchedEffect(runningTimer?.id) {
         while (true) {
@@ -196,20 +225,30 @@ fun HomeScreen(
             projects = projects,
             onSave = { start, end, tag, description, projectId ->
                 timerViewModel.updateTimer(timer.id, start.toString(), end?.toString(), tag, description, projectId)
-                selectedTimer = null
+                selectedTimerId = null
             },
             onDelete = {
                 timerViewModel.deleteTimer(timer.id)
-                selectedTimer = null
+                selectedTimerId = null
             },
-            onDismiss = { selectedTimer = null }
+            onDismiss = { selectedTimerId = null }
         )
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Time Command") },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painter = painterResource(R.drawable.app_logo),
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Time Command")
+                    }
+                },
                 actions = {
                     SyncStatusAction(
                         isOnline = uiState.isOnline,
@@ -297,7 +336,7 @@ fun HomeScreen(
                     timers = uiState.timers,
                     now = now,
                     preferences = preferences,
-                    onSelect = { selectedTimer = it }
+                    onSelect = { selectedTimerId = it.id }
                 )
             }
             MainTab.LIST -> Column(
@@ -323,7 +362,7 @@ fun HomeScreen(
                         preferences = preferences,
                         dailyGoalEnabled = preferences.dailyGoalEnabled,
                         dailyGoals = dailyGoalsList,
-                        onSelect = { selectedTimer = it },
+                        onSelect = { selectedTimerId = it.id },
                         onDayGoalClick = { dateKey, label ->
                             dayGoalDateKey = dateKey
                             dayGoalLabel = label
@@ -387,6 +426,12 @@ private fun TimerTabContent(
             preferences = preferences,
             onEditElapsed = onEditElapsed,
             onEditStartTime = onEditStartTime
+        )
+
+        TimerStateStatusCard(
+            uiState = uiState,
+            now = now,
+            onRefresh = timerViewModel::refreshState
         )
 
         // Start/Stop button below current timer
@@ -481,6 +526,69 @@ private fun TimerTabContent(
         uiState.error?.takeIf { it.isNotBlank() }?.let { err ->
             Text(err, color = colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
+    }
+}
+
+@Composable
+private fun TimerStateStatusCard(
+    uiState: TimerUiState,
+    now: Instant,
+    onRefresh: () -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val statusText = when {
+        uiState.loading && uiState.timers.isEmpty() -> "Loading timer state..."
+        uiState.loading -> "Refreshing timer state..."
+        uiState.isLocalMode -> "Local-only mode. Data stays on this device."
+        !uiState.isOnline && uiState.pendingSyncCount > 0 -> "Offline. ${uiState.pendingSyncCount} change${if (uiState.pendingSyncCount == 1) "" else "s"} waiting to sync."
+        !uiState.isOnline -> "Offline. Showing last known timer state."
+        uiState.lastRefreshAtMillis == null -> "Waiting for the latest timer state..."
+        else -> "Live state updated ${formatRefreshAge(now, uiState.lastRefreshAtMillis)}"
+    }
+    val icon = when {
+        !uiState.isOnline -> Icons.Outlined.CloudOff
+        else -> Icons.Outlined.Sync
+    }
+    val tint = when {
+        !uiState.isOnline -> colorScheme.tertiary
+        uiState.loading -> colorScheme.primary
+        else -> colorScheme.onSurfaceVariant
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant.copy(alpha = 0.65f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(icon, contentDescription = null, tint = tint)
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.bodySmall,
+                color = colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            if (!uiState.isLocalMode) {
+                TextButton(onClick = onRefresh, enabled = !uiState.loading) {
+                    Text(if (uiState.loading) "Refreshing" else "Refresh")
+                }
+            }
+        }
+    }
+}
+
+private fun formatRefreshAge(now: Instant, lastRefreshAtMillis: Long): String {
+    val ageSeconds = ((now.toEpochMilli() - lastRefreshAtMillis).coerceAtLeast(0L) / 1000L).toInt()
+    return when {
+        ageSeconds < 5 -> "just now"
+        ageSeconds < 60 -> "${ageSeconds}s ago"
+        ageSeconds < 3600 -> "${ageSeconds / 60}m ago"
+        else -> "${ageSeconds / 3600}h ago"
     }
 }
 

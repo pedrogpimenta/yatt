@@ -318,20 +318,26 @@ class ApiService(private val settingsStore: SettingsStore) {
 
         val request = requestBuilder.build()
         val response = client.newCall(request).execute()
+        val responseBody = response.body?.string().orEmpty()
+        val errorMessage = runCatching {
+            JSONObject(responseBody).optString("error").takeIf { it.isNotBlank() }
+        }.getOrNull()
+
         if (response.code == 401) {
             response.close()
-            settingsStore.clearAuthToken()
-            settingsStore.setLocalMode(false)
-            throw ApiException("Unauthorized", 401)
+            if (errorMessage == "No token provided" || errorMessage == "Invalid token") {
+                settingsStore.clearAuthToken()
+                settingsStore.setLocalMode(false)
+                throw ApiException("Session expired. Please sign in again.", 401)
+            }
+            throw ApiException(errorMessage ?: "Unauthorized", 401)
         }
         if (response.code == 204) {
             response.close()
             return ""
         }
-        val responseBody = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
             response.close()
-            val errorMessage = runCatching { JSONObject(responseBody).optString("error") }.getOrNull()
             throw ApiException(errorMessage ?: "Request failed with ${response.code}", response.code)
         }
         response.close()

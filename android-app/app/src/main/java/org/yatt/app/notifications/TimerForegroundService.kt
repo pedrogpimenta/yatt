@@ -27,6 +27,7 @@ class TimerForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         createNotificationChannel()
     }
 
@@ -49,10 +50,11 @@ class TimerForegroundService : Service() {
                 stopSelf()
             }
         }
-        return START_STICKY
+        return START_REDELIVER_INTENT
     }
 
     override fun onDestroy() {
+        isRunning = false
         stopTicker()
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
@@ -111,7 +113,7 @@ class TimerForegroundService : Service() {
         }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(contentText)
             .setStyle(
@@ -159,5 +161,8 @@ class TimerForegroundService : Service() {
 
         internal const val CHANNEL_ID = "timer_channel"
         internal const val NOTIFICATION_ID = 2001
+
+        @Volatile
+        var isRunning: Boolean = false
     }
 }

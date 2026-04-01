@@ -14,6 +14,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -34,9 +35,11 @@ import org.yatt.app.viewmodel.SettingsViewModel
 import org.yatt.app.viewmodel.TimerViewModel
 import android.Manifest
 import android.os.Build
-import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val pendingStopTimerIdState: MutableState<String?> = mutableStateOf(null)
@@ -79,10 +82,6 @@ class MainActivity : ComponentActivity() {
         }
 
         RequestNotificationPermission()
-
-        LaunchedEffect(Unit) {
-            container.fcmRegistration.registerWithApi()
-        }
 
         val pendingStopId by pendingStopTimerIdState
         LaunchedEffect(pendingStopId) {
@@ -145,20 +144,35 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun RequestNotificationPermission() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-
+    val context = LocalContext.current
+    val app = context.applicationContext as? YattApp
+    val scope = rememberCoroutineScope()
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { }
-    val context = LocalContext.current
+    ) { granted ->
+        val registration = app?.container?.fcmRegistration ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            if (granted) registration.registerWithApi()
+            else registration.unregisterFromApi()
+        }
+    }
 
     LaunchedEffect(Unit) {
+        val registration = app?.container?.fcmRegistration ?: return@LaunchedEffect
         val hasPermission = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.POST_NOTIFICATIONS
         ) == PackageManager.PERMISSION_GRANTED
-        if (!hasPermission) {
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasPermission) {
             launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return@LaunchedEffect
+        }
+
+        if (NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            registration.registerWithApi()
+        } else {
+            registration.unregisterFromApi()
         }
     }
 }

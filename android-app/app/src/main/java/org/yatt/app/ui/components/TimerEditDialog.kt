@@ -51,20 +51,20 @@ fun TimerEditDialog(
     val zoneId = ZoneId.systemDefault()
     val startInstant = TimeUtils.parseInstant(timer.startTime)
     val startDateTime = LocalDateTime.ofInstant(startInstant, zoneId)
-    var startDate by remember { mutableStateOf(startDateTime.toLocalDate()) }
-    var startTime by remember { mutableStateOf(startDateTime.toLocalTime()) }
+    var startDate by remember(timer.id, timer.startTime) { mutableStateOf(startDateTime.toLocalDate()) }
+    var startTime by remember(timer.id, timer.startTime) { mutableStateOf(startDateTime.toLocalTime()) }
 
     val endInstant = timer.endTime?.let { TimeUtils.parseInstant(it) }
     val endDateTime = endInstant?.let { LocalDateTime.ofInstant(it, zoneId) }
-    var hasEnd by remember { mutableStateOf(endDateTime != null) }
-    var endDate by remember { mutableStateOf(endDateTime?.toLocalDate() ?: startDate) }
-    var endTime by remember { mutableStateOf(endDateTime?.toLocalTime() ?: startTime) }
+    var hasEnd by remember(timer.id, timer.endTime) { mutableStateOf(endDateTime != null) }
+    var endDate by remember(timer.id, timer.endTime, timer.startTime) { mutableStateOf(endDateTime?.toLocalDate() ?: startDate) }
+    var endTime by remember(timer.id, timer.endTime, timer.startTime) { mutableStateOf(endDateTime?.toLocalTime() ?: startTime) }
 
-    var tag by remember { mutableStateOf(timer.tag.orEmpty()) }
-    var description by remember { mutableStateOf(timer.description.orEmpty()) }
+    var tag by remember(timer.id, timer.tag) { mutableStateOf(timer.tag.orEmpty()) }
+    var description by remember(timer.id, timer.description) { mutableStateOf(timer.description.orEmpty()) }
     var selectedProjectId by remember(timer) { mutableStateOf(timer.projectId) }
     var projectMenuExpanded by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember(timer.id, timer.startTime, timer.endTime, timer.tag, timer.description, timer.projectId) { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
 
