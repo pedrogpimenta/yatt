@@ -45,6 +45,9 @@ const selectedTimer = ref(null)
 const selectedTimerFromCalendar = ref(false)
 const filterTag = ref('') // '' means all tags
 const dailyGoals = ref({}) // date key -> hours
+const refreshingTimers = ref(false)
+const lastTimerRefreshAt = ref(0)
+const refreshClock = ref(Date.now())
 
 // Modal stack to track open modals (for Escape key handling)
 const modalStack = ref([])
@@ -254,14 +257,68 @@ async function saveManualEntry() {
 const isOnline = ref(api.getOnlineStatus())
 const pendingSyncCount = ref(0)
 const syncing = ref(false)
+const isLocalOnly = computed(() => api.isLocalMode())
 
+const SW_REFRESH_SCOPE_TIMERS = 'timers'
 let tickInterval = null
+let activeTimerFetch = null
+let queuedTimerRefresh = false
 
 const runningTimer = computed(() => {
   return timers.value.find(t => !t.end_time)
 })
 
 const isRunning = computed(() => !!runningTimer.value)
+
+function markTimerStateFresh() {
+  lastTimerRefreshAt.value = Date.now()
+  refreshClock.value = lastTimerRefreshAt.value
+}
+
+const refreshBusy = computed(() => loading.value || refreshingTimers.value)
+
+const refreshStatusText = computed(() => {
+  if (loading.value && timers.value.length === 0) {
+    return 'Loading timer state...'
+  }
+
+  if (refreshingTimers.value) {
+    return 'Refreshing live timer state...'
+  }
+
+  if (isLocalOnly.value) {
+    return 'Local-only mode. Data stays on this device.'
+  }
+
+  if (!isOnline.value) {
+    if (pendingSyncCount.value > 0) {
+      return `Offline. ${pendingSyncCount.value} change${pendingSyncCount.value === 1 ? '' : 's'} waiting to sync.`
+    }
+    return 'Offline. Showing last known timer state.'
+  }
+
+  if (!lastTimerRefreshAt.value) {
+    return 'Waiting for the latest timer state...'
+  }
+
+  const ageSeconds = Math.max(0, Math.floor((refreshClock.value - lastTimerRefreshAt.value) / 1000))
+
+  if (ageSeconds < 5) {
+    return 'Live state updated just now'
+  }
+
+  if (ageSeconds < 60) {
+    return `Live state updated ${ageSeconds}s ago`
+  }
+
+  const ageMinutes = Math.floor(ageSeconds / 60)
+  if (ageMinutes < 60) {
+    return `Live state updated ${ageMinutes}m ago`
+  }
+
+  const ageHours = Math.floor(ageMinutes / 60)
+  return `Live state updated ${ageHours}h ago`
+})
 
 function findProjectById(id) {
   if (id === null || id === undefined) return null
@@ -401,13 +458,14 @@ async function saveEditElapsed() {
 
 function onWsMessage(data) {
   if (data.type === 'timer') {
-    fetchTimers()
+    applyRealtimeTimerEvent(data)
   }
 }
 
 function onOnlineStatusChange(online) {
   isOnline.value = online
   if (online) {
+    requestTimerRefresh('online')
     // Trigger sync when back online
     syncPendingChanges()
   }
@@ -615,20 +673,147 @@ function formatDuration(ms) {
   return formatHHmmss(ms)
 }
 
-async function fetchTimers() {
-  try {
-    timers.value = await api.getTimers()
-    updateCurrentElapsed()
-    // Sync tag input with running timer's tag
-    if (runningTimer.value) {
-      newTag.value = runningTimer.value.tag || ''
-      newDescription.value = runningTimer.value.description || ''
-      newProjectId.value = runningTimer.value.project_id || null
+function sortTimersForDisplay(items) {
+  return [...items].sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
+}
+
+function syncRunningInputsFromTimers() {
+  if (runningTimer.value) {
+    newTag.value = runningTimer.value.tag || ''
+    newDescription.value = runningTimer.value.description || ''
+    newProjectId.value = runningTimer.value.project_id || null
+  }
+}
+
+function replaceTimers(nextTimers) {
+  timers.value = sortTimersForDisplay(nextTimers)
+  syncSelectedTimerFromTimers(timers.value)
+  updateCurrentElapsed()
+  syncRunningInputsFromTimers()
+}
+
+function upsertTimer(timer) {
+  if (!timer?.id) return
+
+  const nextTimers = [...timers.value]
+  const existingIndex = nextTimers.findIndex((item) => String(item.id) === String(timer.id))
+
+  if (existingIndex === -1) {
+    nextTimers.push(timer)
+  } else {
+    nextTimers.splice(existingIndex, 1, {
+      ...nextTimers[existingIndex],
+      ...timer
+    })
+  }
+
+  replaceTimers(nextTimers)
+}
+
+function removeTimerById(timerId) {
+  replaceTimers(timers.value.filter((timer) => String(timer.id) !== String(timerId)))
+}
+
+function applyRealtimeTimerEvent(message) {
+  if (message?.type !== 'timer') return
+
+  if (message.event === 'deleted') {
+    removeTimerById(message.data?.id)
+  } else if (message.data) {
+    upsertTimer(message.data)
+  }
+
+  markTimerStateFresh()
+}
+
+async function fetchTimers(options = {}) {
+  const background = options.background ?? !loading.value
+
+  if (activeTimerFetch) {
+    queuedTimerRefresh = true
+    return activeTimerFetch
+  }
+
+  if (background) {
+    refreshingTimers.value = true
+  }
+
+  activeTimerFetch = (async () => {
+    try {
+      const latestTimers = await api.getTimers()
+      replaceTimers(Array.isArray(latestTimers) ? latestTimers : [])
+      markTimerStateFresh()
+      error.value = ''
+    } catch (err) {
+      error.value = err.message
+    } finally {
+      loading.value = false
+      refreshingTimers.value = false
     }
-  } catch (err) {
-    error.value = err.message
+  })()
+
+  try {
+    return await activeTimerFetch
   } finally {
-    loading.value = false
+    activeTimerFetch = null
+
+    if (queuedTimerRefresh) {
+      queuedTimerRefresh = false
+      fetchTimers({ background: true })
+    }
+  }
+}
+
+async function requestTimerRefresh(source = 'manual-refresh') {
+  if (isLocalOnly.value) {
+    await fetchTimers({ background: !loading.value })
+    return
+  }
+
+  if (!('serviceWorker' in navigator)) {
+    await fetchTimers({ background: !loading.value })
+    return
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.ready
+    const worker = registration.active || registration.waiting || registration.installing || navigator.serviceWorker.controller
+    if (worker) {
+      worker.postMessage({
+        type: 'refresh-request',
+        scope: SW_REFRESH_SCOPE_TIMERS,
+        source
+      })
+      return
+    }
+  } catch {
+    // Fall through to a direct refresh when the service worker is unavailable.
+  }
+
+  await fetchTimers({ background: !loading.value })
+}
+
+function handleServiceWorkerMessage(event) {
+  const data = event.data
+  if (!data || typeof data !== 'object') return
+
+  if (data.type === 'service-worker-ready') {
+    fetchTimers({ background: !loading.value })
+    return
+  }
+
+  if (data.type === 'refresh-request' && data.scope === SW_REFRESH_SCOPE_TIMERS) {
+    fetchTimers({ background: !loading.value })
+  }
+}
+
+function handleWindowFocus() {
+  requestTimerRefresh('window-focus')
+}
+
+function handleVisibilityRefresh() {
+  if (document.visibilityState === 'visible') {
+    requestTimerRefresh('tab-visible')
   }
 }
 
@@ -870,8 +1055,7 @@ const selectedTimerHiddenEndDate = ref('')
 const selectedTimerStartDatePicker = ref(null)
 const selectedTimerEndDatePicker = ref(null)
 const selectedTimerEditingTime = ref(false)
-/** When user opened the modal for a running timer; used to add time spent editing to duration on save */
-const selectedTimerEditStartedAt = ref(0)
+const selectedTimerDraftBase = ref(null)
 
 const selectedTimerDisplayDurationMs = computed(() => {
   const t = selectedTimer.value
@@ -898,32 +1082,86 @@ const selectedTimerFormDurationMs = computed(() => {
   return Math.max(0, endMs - startMs)
 })
 
-watch(selectedTimer, (t) => {
+function createSelectedTimerDraftSnapshot(timer) {
+  return {
+    startDate: formatDateForInput(timer.start_time),
+    startTime: formatTimeForInput(timer.start_time),
+    endDate: timer.end_time ? formatDateForInput(timer.end_time) : '',
+    endTime: timer.end_time ? formatTimeForInput(timer.end_time) : '',
+    tag: timer.tag || '',
+    description: timer.description || '',
+    projectId: timer.project_id ?? null
+  }
+}
+
+function hydrateSelectedTimerForm(t, options = {}) {
   if (!t) return
+
+  const snapshot = createSelectedTimerDraftSnapshot(t)
   const ms = t.end_time
     ? new Date(t.end_time).getTime() - new Date(t.start_time).getTime()
     : Date.now() - new Date(t.start_time).getTime()
   selectedTimerEditDuration.value = formatHHmmss(ms)
-  selectedTimerEditStartDate.value = formatDateForInput(t.start_time)
-  selectedTimerEditStartTime.value = formatTimeForInput(t.start_time)
+  selectedTimerEditStartDate.value = snapshot.startDate
+  selectedTimerEditStartTime.value = snapshot.startTime
   selectedTimerHiddenStartDate.value = toISODateString(new Date(t.start_time))
   if (t.end_time) {
-    selectedTimerEditEndDate.value = formatDateForInput(t.end_time)
-    selectedTimerEditEndTime.value = formatTimeForInput(t.end_time)
+    selectedTimerEditEndDate.value = snapshot.endDate
+    selectedTimerEditEndTime.value = snapshot.endTime
     selectedTimerHiddenEndDate.value = toISODateString(new Date(t.end_time))
   } else {
     selectedTimerEditEndDate.value = ''
     selectedTimerEditEndTime.value = ''
     selectedTimerHiddenEndDate.value = ''
   }
-  selectedTimerEditTag.value = t.tag || ''
-  selectedTimerEditDescription.value = t.description || ''
-  selectedTimerEditProjectId.value = t.project_id ?? null
-  if (!t.end_time) {
-    selectedTimerLiveMs.value = ms
-    selectedTimerEditStartedAt.value = Date.now()
+  selectedTimerEditTag.value = snapshot.tag
+  selectedTimerEditDescription.value = snapshot.description
+  selectedTimerEditProjectId.value = snapshot.projectId
+  selectedTimerLiveMs.value = ms
+  selectedTimerDraftBase.value = snapshot
+  if (options.resetEditingTime !== false) {
+    selectedTimerEditingTime.value = false
   }
-  selectedTimerEditingTime.value = false
+}
+
+function hasSelectedTimerDraftChanges() {
+  if (!selectedTimer.value || !selectedTimerDraftBase.value) return false
+
+  const base = selectedTimerDraftBase.value
+
+  return (
+    selectedTimerEditingTime.value ||
+    selectedTimerEditStartDate.value !== base.startDate ||
+    selectedTimerEditStartTime.value !== base.startTime ||
+    selectedTimerEditEndDate.value !== base.endDate ||
+    selectedTimerEditEndTime.value !== base.endTime ||
+    (selectedTimerEditTag.value || '') !== base.tag ||
+    (selectedTimerEditDescription.value || '') !== base.description ||
+    String(selectedTimerEditProjectId.value ?? null) !== String(base.projectId ?? null)
+  )
+}
+
+function syncSelectedTimerFromTimers(timerList = timers.value) {
+  if (!selectedTimer.value) return
+
+  const latestTimer = timerList.find((timer) => String(timer.id) === String(selectedTimer.value.id))
+  if (!latestTimer) {
+    closeSelectedTimer()
+    return
+  }
+
+  Object.assign(selectedTimer.value, latestTimer)
+
+  if (!hasSelectedTimerDraftChanges()) {
+    hydrateSelectedTimerForm(latestTimer, { resetEditingTime: false })
+  } else if (!latestTimer.end_time) {
+    selectedTimerLiveMs.value = Date.now() - new Date(latestTimer.start_time).getTime()
+  }
+}
+
+watch(selectedTimer, (t) => {
+  if (!t) return
+  hydrateSelectedTimerForm(t)
 })
 
 function selectedTimerOpenStartDatePicker() {
@@ -983,6 +1221,7 @@ function closeSelectedTimer() {
   selectedTimer.value = null
   selectedTimerFromCalendar.value = false
   selectedTimerEditingTime.value = false
+  selectedTimerDraftBase.value = null
   popModal('selectedTimer')
 }
 
@@ -994,43 +1233,30 @@ async function handleSelectedTimerSave() {
   const t = selectedTimer.value
   if (!t) return
   error.value = ''
-  let startDateTime
+  const startDateParts = parseDateInput(selectedTimerEditStartDate.value)
+  const startTimeParts = parseTimeInput(selectedTimerEditStartTime.value)
+  if (!startDateParts || !startTimeParts) {
+    error.value = `Invalid start. Use ${getDatePlaceholder()} and ${getTimePlaceholder()}`
+    return
+  }
+
+  const startDateTime = new Date(startDateParts.year, startDateParts.month, startDateParts.day, startTimeParts.hours, startTimeParts.minutes)
   let endTime = null
 
-  if (!t.end_time) {
-    // Running timer: keep it running; add time spent editing to duration (like sidebar)
-    const durationMs = parseHHmmss(selectedTimerEditDuration.value)
-    if (durationMs === null) {
-      error.value = 'Invalid duration. Use HH:mm:ss or HH:mm'
+  const hasEndDraft = Boolean(selectedTimerEditEndDate.value || selectedTimerEditEndTime.value)
+  if (hasEndDraft) {
+    const endDateParts = parseDateInput(selectedTimerEditEndDate.value)
+    const endTimeParts = parseTimeInput(selectedTimerEditEndTime.value)
+    if (!endDateParts || !endTimeParts) {
+      error.value = `Invalid end. Use ${getDatePlaceholder()} and ${getTimePlaceholder()}`
       return
     }
-    const timeSinceEditStarted = Date.now() - selectedTimerEditStartedAt.value
-    const totalElapsedMs = durationMs + timeSinceEditStarted
-    startDateTime = new Date(Date.now() - totalElapsedMs)
-    endTime = null
-  } else {
-    // Stopped timer: use start/end from form
-    const startDateParts = parseDateInput(selectedTimerEditStartDate.value)
-    const startTimeParts = parseTimeInput(selectedTimerEditStartTime.value)
-    if (!startDateParts || !startTimeParts) {
-      error.value = `Invalid start. Use ${getDatePlaceholder()} and ${getTimePlaceholder()}`
+    const endDateTime = new Date(endDateParts.year, endDateParts.month, endDateParts.day, endTimeParts.hours, endTimeParts.minutes)
+    if (endDateTime <= startDateTime) {
+      error.value = 'End must be after start'
       return
     }
-    startDateTime = new Date(startDateParts.year, startDateParts.month, startDateParts.day, startTimeParts.hours, startTimeParts.minutes)
-    if (selectedTimerEditEndDate.value && selectedTimerEditEndTime.value) {
-      const endDateParts = parseDateInput(selectedTimerEditEndDate.value)
-      const endTimeParts = parseTimeInput(selectedTimerEditEndTime.value)
-      if (!endDateParts || !endTimeParts) {
-        error.value = `Invalid end. Use ${getDatePlaceholder()} and ${getTimePlaceholder()}`
-        return
-      }
-      const endDateTime = new Date(endDateParts.year, endDateParts.month, endDateParts.day, endTimeParts.hours, endTimeParts.minutes)
-      if (endDateTime <= startDateTime) {
-        error.value = 'End must be after start'
-        return
-      }
-      endTime = endDateTime.toISOString()
-    }
+    endTime = endDateTime.toISOString()
   }
 
   try {
@@ -1077,11 +1303,17 @@ onMounted(() => {
   updatePendingSyncCount()
   tickInterval = setInterval(() => {
     updateCurrentElapsed()
+    refreshClock.value = Date.now()
   }, 1000)
   
   api.addWsListener(onWsMessage)
   api.addOnlineListener(onOnlineStatusChange)
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('focus', handleWindowFocus)
+  document.addEventListener('visibilitychange', handleVisibilityRefresh)
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage)
+  }
 })
 
 onUnmounted(() => {
@@ -1091,6 +1323,11 @@ onUnmounted(() => {
   api.removeWsListener(onWsMessage)
   api.removeOnlineListener(onOnlineStatusChange)
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('focus', handleWindowFocus)
+  document.removeEventListener('visibilitychange', handleVisibilityRefresh)
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage)
+  }
 })
 </script>
 
@@ -1185,6 +1422,27 @@ onUnmounted(() => {
               <button @click="saveEditStartTime" class="btn-icon btn-icon-primary" title="Save">✓</button>
             </div>
           </div>
+        </div>
+
+        <div class="refresh-status">
+          <div class="refresh-state" :class="{ busy: refreshBusy, offline: !isOnline && !isLocalOnly }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ spinning: refreshBusy }">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10"></path>
+              <path d="M20.49 15a9 9 0 0 1-14.13 3.36L1 14"></path>
+            </svg>
+            <span>{{ refreshStatusText }}</span>
+          </div>
+          <button
+            v-if="!isLocalOnly"
+            type="button"
+            class="refresh-now-btn"
+            :disabled="refreshBusy"
+            @click="requestTimerRefresh('manual-refresh')"
+          >
+            Refresh
+          </button>
         </div>
 
         <!-- Project Selector -->
@@ -1753,6 +2011,68 @@ onUnmounted(() => {
 /* Current Timer */
 .current-timer-section {
   text-align: center;
+}
+
+.refresh-status {
+  display: flex;
+  align-items: stretch;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.refresh-state {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0.875rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.refresh-state.busy {
+  color: var(--accent-color);
+  border-color: rgba(74, 158, 255, 0.35);
+}
+
+.refresh-state.offline {
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.refresh-state svg {
+  flex: 0 0 auto;
+}
+
+.refresh-state svg.spinning {
+  animation: spin 1s linear infinite;
+}
+
+.refresh-now-btn {
+  flex: 0 0 auto;
+  padding: 0.75rem 0.9rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: border-color 0.2s, color 0.2s, opacity 0.2s;
+}
+
+.refresh-now-btn:hover:not(:disabled) {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.refresh-now-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .current-timer {

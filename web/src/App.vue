@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from './api.js'
 import { preferences } from './preferences.js'
 import Login from './components/Login.vue'
@@ -8,7 +8,9 @@ import Settings from './components/Settings.vue'
 
 const isLoggedIn = ref(!!api.getToken())
 const showSettings = ref(false)
+const sessionExpiredMessage = ref('')
 const timerRef = ref(null)
+let authCheckInProgress = false
 
 async function loadUserPreferences() {
   if (!api.getToken() || api.isLocalMode()) {
@@ -36,11 +38,13 @@ async function loadUserPreferences() {
 }
 
 async function handleLogin() {
+  sessionExpiredMessage.value = ''
   isLoggedIn.value = true
   await loadUserPreferences()
 }
 
 async function handleLogout() {
+  sessionExpiredMessage.value = ''
   await api.logout()
   isLoggedIn.value = false
   showSettings.value = false
@@ -55,17 +59,61 @@ function closeSettings() {
   timerRef.value?.refetch?.()
 }
 
+function handleSessionExpired(event = {}) {
+  isLoggedIn.value = false
+  showSettings.value = false
+  sessionExpiredMessage.value = event.message || 'Your session expired. Please sign in again.'
+}
+
+async function validateSessionOnFocus() {
+  if (authCheckInProgress || !isLoggedIn.value || api.isLocalMode() || !api.getToken()) {
+    return
+  }
+
+  authCheckInProgress = true
+
+  try {
+    await api.validateSession()
+  } catch (err) {
+    if (
+      err.message !== 'Your session expired. Please sign in again.' &&
+      err.message !== 'Unauthorized' &&
+      err.message !== 'Failed to fetch' &&
+      err.name !== 'TypeError'
+    ) {
+      console.error('Failed to validate session on focus:', err)
+    }
+  } finally {
+    authCheckInProgress = false
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    validateSessionOnFocus()
+  }
+}
+
 onMounted(() => {
+  api.addAuthListener(handleSessionExpired)
   isLoggedIn.value = !!api.getToken()
   if (isLoggedIn.value) {
     loadUserPreferences()
   }
+  window.addEventListener('focus', validateSessionOnFocus)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+})
+
+onUnmounted(() => {
+  api.removeAuthListener(handleSessionExpired)
+  window.removeEventListener('focus', validateSessionOnFocus)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 
 <template>
   <div class="app" :class="{ 'logged-in': isLoggedIn }">
-    <Login v-if="!isLoggedIn" @login="handleLogin" />
+    <Login v-if="!isLoggedIn" :session-message="sessionExpiredMessage" @login="handleLogin" />
     <Timer ref="timerRef" v-else @openSettings="openSettings" />
     
     <!-- Settings Modal -->
