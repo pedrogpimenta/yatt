@@ -912,6 +912,27 @@ export const api = {
     return { preferencesPayload }
   },
 
+  // Dropbox sync
+  getDropboxStatus() {
+    return request('/dropbox/status')
+  },
+
+  getDropboxAuthUrl() {
+    return request('/dropbox/auth-url', { method: 'POST' })
+  },
+
+  dropboxExport() {
+    return request('/dropbox/export', { method: 'POST' })
+  },
+
+  dropboxImport() {
+    return request('/dropbox/import', { method: 'POST' })
+  },
+
+  dropboxDisconnect() {
+    return request('/dropbox/disconnect', { method: 'DELETE' })
+  },
+
   // OneDrive sync
   getOnedriveStatus() {
     return request('/onedrive/status')

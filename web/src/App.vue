@@ -16,10 +16,9 @@ const resetToken = ref(new URLSearchParams(window.location.search).get('reset_to
 
 const searchParams = new URLSearchParams(window.location.search)
 const onedriveResult = searchParams.get('onedrive')
-if (onedriveResult) {
-  // Clean up query params from URL without reloading
-  const clean = window.location.pathname
-  window.history.replaceState({}, '', clean)
+const dropboxResult = searchParams.get('dropbox')
+if (onedriveResult || dropboxResult) {
+  window.history.replaceState({}, '', window.location.pathname)
 }
 const onedriveMessage = ref(
   onedriveResult === 'connected'
@@ -29,6 +28,14 @@ const onedriveMessage = ref(
       : ''
 )
 const onedriveMessageType = ref(onedriveResult === 'connected' ? 'success' : 'error')
+const dropboxMessage = ref(
+  dropboxResult === 'connected'
+    ? 'Dropbox connected successfully!'
+    : dropboxResult === 'error'
+      ? `Dropbox connection failed: ${searchParams.get('message') || 'unknown error'}`
+      : ''
+)
+const dropboxMessageType = ref(dropboxResult === 'connected' ? 'success' : 'error')
 
 async function loadUserPreferences() {
   if (!api.getToken() || api.isLocalMode()) {
@@ -141,10 +148,14 @@ onUnmounted(() => {
       @logout="handleLogout"
     />
 
-    <!-- OneDrive OAuth result notification -->
+    <!-- OAuth result notifications -->
     <div v-if="onedriveMessage" :class="['onedrive-toast', onedriveMessageType]">
       {{ onedriveMessage }}
       <button @click="onedriveMessage = ''">&times;</button>
+    </div>
+    <div v-if="dropboxMessage" :class="['onedrive-toast', dropboxMessageType]">
+      {{ dropboxMessage }}
+      <button @click="dropboxMessage = ''">&times;</button>
     </div>
   </div>
 </template>

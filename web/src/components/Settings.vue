@@ -216,6 +216,71 @@ async function downloadCSV() {
   }
 }
 
+// Dropbox sync
+const dropboxStatus = ref(null)
+const dropboxLoading = ref(false)
+
+async function fetchDropboxStatus() {
+  if (isLocalMode.value) return
+  try {
+    dropboxStatus.value = await api.getDropboxStatus()
+  } catch {
+    // ignore
+  }
+}
+
+async function connectDropbox() {
+  dropboxLoading.value = true
+  try {
+    const { url } = await api.getDropboxAuthUrl()
+    window.location.href = url
+  } catch (err) {
+    error.value = err.message
+    dropboxLoading.value = false
+  }
+}
+
+async function disconnectDropbox() {
+  if (!window.confirm('Disconnect Dropbox? Your data will remain on this server.')) return
+  dropboxLoading.value = true
+  try {
+    await api.dropboxDisconnect()
+    dropboxStatus.value = { ...dropboxStatus.value, connected: false }
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    dropboxLoading.value = false
+  }
+}
+
+async function dropboxExport() {
+  dropboxLoading.value = true
+  error.value = ''
+  try {
+    const result = await api.dropboxExport()
+    success.value = `Exported ${result.timers} timers to Dropbox`
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    dropboxLoading.value = false
+  }
+}
+
+async function dropboxImport() {
+  if (!window.confirm('Import from Dropbox? New timers will be added, existing ones kept.')) return
+  dropboxLoading.value = true
+  error.value = ''
+  try {
+    const result = await api.dropboxImport()
+    success.value = `Imported ${result.imported} new timers from Dropbox`
+    if (result.imported > 0) setTimeout(() => window.location.reload(), 1000)
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    dropboxLoading.value = false
+  }
+}
+
 // OneDrive sync
 const onedriveStatus = ref(null) // null = loading, { configured, connected }
 const onedriveLoading = ref(false)
@@ -404,6 +469,7 @@ onMounted(() => {
   fetchUser()
   fetchProjects()
   fetchClients()
+  fetchDropboxStatus()
   fetchOnedriveStatus()
   window.addEventListener('keydown', handleKeydown, true)
 })
@@ -504,6 +570,32 @@ onUnmounted(() => {
           <button @click="downloadCSV" class="export-btn">
             Download CSV
           </button>
+        </section>
+
+        <!-- Dropbox Sync -->
+        <section v-if="!isLocalMode && dropboxStatus?.configured" class="settings-section">
+          <h3>Dropbox Sync</h3>
+          <p class="section-description">
+            Back up and restore your data using your personal Dropbox account.
+          </p>
+          <template v-if="dropboxStatus.connected">
+            <div class="onedrive-actions">
+              <button @click="dropboxExport" class="export-btn" :disabled="dropboxLoading">
+                {{ dropboxLoading ? '...' : 'Export to Dropbox' }}
+              </button>
+              <button @click="dropboxImport" class="export-btn" :disabled="dropboxLoading">
+                {{ dropboxLoading ? '...' : 'Import from Dropbox' }}
+              </button>
+            </div>
+            <button @click="disconnectDropbox" class="onedrive-disconnect-btn" :disabled="dropboxLoading">
+              Disconnect Dropbox
+            </button>
+          </template>
+          <template v-else>
+            <button @click="connectDropbox" class="sync-btn" :disabled="dropboxLoading">
+              {{ dropboxLoading ? 'Redirecting...' : 'Connect Dropbox' }}
+            </button>
+          </template>
         </section>
 
         <!-- OneDrive Sync (only for logged-in users when server is configured) -->
