@@ -2,6 +2,13 @@
 import { ref } from 'vue'
 import { api } from '../api.js'
 
+const props = defineProps({
+  sessionMessage: {
+    type: String,
+    default: ''
+  }
+})
+
 const emit = defineEmits(['login'])
 
 const email = ref('')
@@ -39,6 +46,7 @@ function useWithoutAccount() {
       Time Command
     </div>
     <h2>{{ isRegistering ? 'Create Account' : 'Sign In' }}</h2>
+    <p v-if="props.sessionMessage" class="session-message">{{ props.sessionMessage }}</p>
     
     <form @submit.prevent="handleSubmit">
       <div class="field">
@@ -165,6 +173,18 @@ input::placeholder {
   color: var(--danger-color);
   font-size: 0.875rem;
   text-align: center;
+}
+
+.session-message {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger-color);
+  font-size: 0.875rem;
+  text-align: center;
+  line-height: 1.4;
 }
 
 .submit-btn {

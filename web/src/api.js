@@ -7,6 +7,9 @@ const API_BASE = '/api'
 let isOnline = navigator.onLine
 let onlineListeners = new Set()
 let syncInProgress = false
+let authListeners = new Set()
+
+const SESSION_EXPIRED_MESSAGE = 'Your session expired. Please sign in again.'
 
 // Local-only mode (no account)
 const LOCAL_MODE_KEY = 'yatt_local_mode'
@@ -59,6 +62,10 @@ function notifyOnlineStatus(online) {
   onlineListeners.forEach(listener => listener(online))
 }
 
+function isNetworkError(err) {
+  return err?.message === 'Failed to fetch' || err?.name === 'TypeError'
+}
+
 function addOnlineListener(listener) {
   onlineListeners.add(listener)
   // Immediately notify current status
@@ -90,6 +97,24 @@ function clearToken() {
   setLocalMode(false)
 }
 
+function notifyAuthExpired(message = SESSION_EXPIRED_MESSAGE) {
+  const hadStoredToken = !!localStorage.getItem('token')
+  disconnectWebSocket()
+  clearToken()
+
+  if (hadStoredToken) {
+    authListeners.forEach(listener => listener({ message }))
+  }
+}
+
+function addAuthListener(listener) {
+  authListeners.add(listener)
+}
+
+function removeAuthListener(listener) {
+  authListeners.delete(listener)
+}
+
 async function logout() {
   // Clear all local data
   await offlineStorage.clearAllData()
@@ -115,8 +140,22 @@ async function request(endpoint, options = {}) {
   })
 
   if (res.status === 401) {
-    clearToken()
-    throw new Error('Unauthorized')
+    let authError = null
+
+    try {
+      authError = await res.json()
+    } catch {
+      authError = null
+    }
+
+    const errorMessage = authError?.error || 'Unauthorized'
+
+    if (errorMessage === 'No token provided' || errorMessage === 'Invalid token') {
+      notifyAuthExpired()
+      throw new Error(SESSION_EXPIRED_MESSAGE)
+    }
+
+    throw new Error(errorMessage)
   }
 
   if (res.status === 204) {
@@ -141,7 +180,24 @@ async function tryRequest(endpoint, options = {}) {
     return await request(endpoint, options)
   } catch (err) {
     // Network error - likely offline
-    if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
+    if (isNetworkError(err)) {
+      isOnline = false
+      notifyOnlineStatus(false)
+      return null
+    }
+    throw err
+  }
+}
+
+async function validateSession() {
+  if (isLocalMode() || !localStorage.getItem('token') || !isOnline) {
+    return null
+  }
+
+  try {
+    return await request('/auth/me')
+  } catch (err) {
+    if (isNetworkError(err)) {
       isOnline = false
       notifyOnlineStatus(false)
       return null
@@ -291,6 +347,8 @@ function connectWebSocket() {
         const data = JSON.parse(event.data)
         if (data.type === 'auth' && data.status === 'ok') {
           console.log('WebSocket authenticated')
+        } else if (data.type === 'auth' && data.status === 'error') {
+          notifyAuthExpired()
         } else if (data.type === 'timer') {
           console.log('Timer event:', data.event)
           wsListeners.forEach(listener => listener(data))
@@ -330,6 +388,7 @@ function disconnectWebSocket() {
     wsReconnectTimer = null
   }
   if (ws) {
+    ws.onclose = null
     ws.close()
     ws = null
   }
@@ -364,6 +423,9 @@ export const api = {
   getOnlineStatus,
   attemptSync,
   getPendingSyncCount,
+  addAuthListener,
+  removeAuthListener,
+  validateSession,
 
   login(email, password) {
     return request('/auth/login', {
