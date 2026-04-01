@@ -148,10 +148,11 @@ function selectTimer(timer) {
 }
 
 function getDayTotalMs(day) {
+  const dayStartHour = preferences.dayStartHour || 0
   const dayStart = new Date(day)
-  dayStart.setHours(0, 0, 0, 0)
-  const dayEnd = new Date(day)
-  dayEnd.setHours(23, 59, 59, 999)
+  dayStart.setHours(dayStartHour, 0, 0, 0)
+  const dayEnd = new Date(dayStart)
+  dayEnd.setDate(dayEnd.getDate() + 1)
 
   // Reference currentElapsed so this recomputes while a timer is running
   const _reactive = props.currentElapsed
@@ -160,7 +161,7 @@ function getDayTotalMs(day) {
     .filter(timer => {
       const start = new Date(timer.start_time)
       const end = timer.end_time ? new Date(timer.end_time) : new Date()
-      return start <= dayEnd && end >= dayStart
+      return start < dayEnd && end > dayStart
     })
     .reduce((total, timer) => {
       const timerStart = new Date(timer.start_time)
@@ -170,6 +171,11 @@ function getDayTotalMs(day) {
       return total + Math.max(0, displayEnd.getTime() - displayStart.getTime())
     }, 0)
 }
+
+const dayStartLineTop = computed(() => {
+  const h = preferences.dayStartHour || 0
+  return h === 0 ? null : `${(h / 24) * 100}%`
+})
 
 function formatDurationShort(ms) {
   const totalSeconds = Math.round(ms / 1000)
@@ -260,6 +266,9 @@ const weekLabel = computed(() => {
             <div class="hour-rows">
               <div v-for="hour in hours" :key="hour" class="hour-row"></div>
             </div>
+
+            <!-- Day start line -->
+            <div v-if="dayStartLineTop" class="day-start-line" :style="{ top: dayStartLineTop }"></div>
             
             <!-- Day columns with timers -->
             <div class="day-columns">
@@ -495,6 +504,17 @@ const weekLabel = computed(() => {
 .hour-row:nth-child(even) {
   background: var(--bg-secondary);
   opacity: 0.5;
+}
+
+.day-start-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent-color);
+  opacity: 0.6;
+  z-index: 2;
+  pointer-events: none;
 }
 
 /* Day columns (vertical divisions) */
