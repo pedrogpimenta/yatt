@@ -14,6 +14,22 @@ let authCheckInProgress = false
 
 const resetToken = ref(new URLSearchParams(window.location.search).get('reset_token') || '')
 
+const searchParams = new URLSearchParams(window.location.search)
+const onedriveResult = searchParams.get('onedrive')
+if (onedriveResult) {
+  // Clean up query params from URL without reloading
+  const clean = window.location.pathname
+  window.history.replaceState({}, '', clean)
+}
+const onedriveMessage = ref(
+  onedriveResult === 'connected'
+    ? 'OneDrive connected successfully!'
+    : onedriveResult === 'error'
+      ? `OneDrive connection failed: ${searchParams.get('message') || 'unknown error'}`
+      : ''
+)
+const onedriveMessageType = ref(onedriveResult === 'connected' ? 'success' : 'error')
+
 async function loadUserPreferences() {
   if (!api.getToken() || api.isLocalMode()) {
     return
@@ -119,11 +135,17 @@ onUnmounted(() => {
     <Timer ref="timerRef" v-else @openSettings="openSettings" />
     
     <!-- Settings Modal -->
-    <Settings 
-      v-if="showSettings" 
-      @close="closeSettings" 
+    <Settings
+      v-if="showSettings"
+      @close="closeSettings"
       @logout="handleLogout"
     />
+
+    <!-- OneDrive OAuth result notification -->
+    <div v-if="onedriveMessage" :class="['onedrive-toast', onedriveMessageType]">
+      {{ onedriveMessage }}
+      <button @click="onedriveMessage = ''">&times;</button>
+    </div>
   </div>
 </template>
 
@@ -188,6 +210,41 @@ body {
 
 .app.logged-in {
   display: flex;
+}
+
+.onedrive-toast {
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+  z-index: 9999;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.onedrive-toast.success {
+  background: var(--success-color);
+  color: #fff;
+}
+
+.onedrive-toast.error {
+  background: var(--danger-color);
+  color: #fff;
+}
+
+.onedrive-toast button {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0;
+  opacity: 0.8;
 }
 
 button {

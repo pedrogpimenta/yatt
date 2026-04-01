@@ -912,11 +912,32 @@ export const api = {
     return { preferencesPayload }
   },
 
+  // OneDrive sync
+  getOnedriveStatus() {
+    return request('/onedrive/status')
+  },
+
+  getOnedriveAuthUrl() {
+    return request('/onedrive/auth-url', { method: 'POST' })
+  },
+
+  onedriveExport() {
+    return request('/onedrive/export', { method: 'POST' })
+  },
+
+  onedriveImport() {
+    return request('/onedrive/import', { method: 'POST' })
+  },
+
+  onedriveDisconnect() {
+    return request('/onedrive/disconnect', { method: 'DELETE' })
+  },
+
   // Local mode helpers
   isLocalMode,
   setLocalMode,
   getDeviceId,
-  
+
   // Logout (clears all local data)
   logout
 }

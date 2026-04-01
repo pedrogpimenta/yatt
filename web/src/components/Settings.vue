@@ -216,6 +216,71 @@ async function downloadCSV() {
   }
 }
 
+// OneDrive sync
+const onedriveStatus = ref(null) // null = loading, { configured, connected }
+const onedriveLoading = ref(false)
+
+async function fetchOnedriveStatus() {
+  if (isLocalMode.value) return
+  try {
+    onedriveStatus.value = await api.getOnedriveStatus()
+  } catch {
+    // ignore - server may not support it
+  }
+}
+
+async function connectOnedrive() {
+  onedriveLoading.value = true
+  try {
+    const { url } = await api.getOnedriveAuthUrl()
+    window.location.href = url
+  } catch (err) {
+    error.value = err.message
+    onedriveLoading.value = false
+  }
+}
+
+async function disconnectOnedrive() {
+  if (!window.confirm('Disconnect OneDrive? Your data will remain on this server.')) return
+  onedriveLoading.value = true
+  try {
+    await api.onedriveDisconnect()
+    onedriveStatus.value = { ...onedriveStatus.value, connected: false }
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    onedriveLoading.value = false
+  }
+}
+
+async function onedriveExport() {
+  onedriveLoading.value = true
+  error.value = ''
+  try {
+    const result = await api.onedriveExport()
+    success.value = `Exported ${result.timers} timers to OneDrive`
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    onedriveLoading.value = false
+  }
+}
+
+async function onedriveImport() {
+  if (!window.confirm('Import from OneDrive? New timers will be added, existing ones kept.')) return
+  onedriveLoading.value = true
+  error.value = ''
+  try {
+    const result = await api.onedriveImport()
+    success.value = `Imported ${result.imported} new timers from OneDrive`
+    if (result.imported > 0) setTimeout(() => window.location.reload(), 1000)
+  } catch (err) {
+    error.value = err.message
+  } finally {
+    onedriveLoading.value = false
+  }
+}
+
 function handleLogout() {
   if (isLocalMode.value) {
     showLogoutConfirm.value = true
@@ -339,6 +404,7 @@ onMounted(() => {
   fetchUser()
   fetchProjects()
   fetchClients()
+  fetchOnedriveStatus()
   window.addEventListener('keydown', handleKeydown, true)
 })
 
@@ -438,6 +504,32 @@ onUnmounted(() => {
           <button @click="downloadCSV" class="export-btn">
             Download CSV
           </button>
+        </section>
+
+        <!-- OneDrive Sync (only for logged-in users when server is configured) -->
+        <section v-if="!isLocalMode && onedriveStatus?.configured" class="settings-section">
+          <h3>OneDrive Sync</h3>
+          <p class="section-description">
+            Back up and restore your data using your personal OneDrive account.
+          </p>
+          <template v-if="onedriveStatus.connected">
+            <div class="onedrive-actions">
+              <button @click="onedriveExport" class="export-btn" :disabled="onedriveLoading">
+                {{ onedriveLoading ? '...' : 'Export to OneDrive' }}
+              </button>
+              <button @click="onedriveImport" class="export-btn" :disabled="onedriveLoading">
+                {{ onedriveLoading ? '...' : 'Import from OneDrive' }}
+              </button>
+            </div>
+            <button @click="disconnectOnedrive" class="onedrive-disconnect-btn" :disabled="onedriveLoading">
+              Disconnect OneDrive
+            </button>
+          </template>
+          <template v-else>
+            <button @click="connectOnedrive" class="sync-btn" :disabled="onedriveLoading">
+              {{ onedriveLoading ? 'Redirecting...' : 'Connect OneDrive' }}
+            </button>
+          </template>
         </section>
 
         <!-- Projects -->
@@ -988,6 +1080,32 @@ onUnmounted(() => {
 .export-btn:hover {
   background: var(--bg-tertiary);
   border-color: var(--border-light);
+}
+
+.onedrive-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.onedrive-actions .export-btn {
+  flex: 1;
+  margin-top: 0;
+}
+
+.onedrive-disconnect-btn {
+  width: 100%;
+  padding: 0.5rem;
+  margin-top: 0.5rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.onedrive-disconnect-btn:hover {
+  color: var(--danger-color);
 }
 
 .projects-list {

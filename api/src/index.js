@@ -9,6 +9,7 @@ const timerRoutes = require('./routes/timers');
 const syncRoutes = require('./routes/sync');
 const projectRoutes = require('./routes/projects');
 const clientRoutes = require('./routes/clients');
+const onedriveRoutes = require('./routes/onedrive');
 const { sendTimerEvent, initAndLogFcmStatus } = require('./notifications/fcm');
 const { JWT_SECRET } = require('./middleware/auth');
 
@@ -97,6 +98,7 @@ app.use('/timers', timerRoutes);
 app.use('/sync', syncRoutes);
 app.use('/projects', projectRoutes);
 app.use('/clients', clientRoutes);
+app.use('/onedrive', onedriveRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
