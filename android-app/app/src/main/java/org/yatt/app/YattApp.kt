@@ -1,8 +1,11 @@
 package org.yatt.app
 
 import android.app.Application
+import android.content.IntentFilter
+import android.content.Intent
 import android.util.Log
 import org.yatt.app.di.AppContainer
+import org.yatt.app.widget.ScreenOnReceiver
 
 class YattApp : Application() {
     lateinit var container: AppContainer
@@ -29,5 +32,12 @@ class YattApp : Application() {
             Log.e("YattApp", "Failed to create AppContainer", e)
             throw e
         }
+        registerReceiver(
+            ScreenOnReceiver(),
+            IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+        )
     }
 }
