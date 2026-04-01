@@ -626,6 +626,20 @@ export const api = {
     })
   },
 
+  forgotPassword(email) {
+    return request('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    })
+  },
+
+  resetPassword(token, newPassword) {
+    return request('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, newPassword })
+    })
+  },
+
   // Timer methods with offline support
   async getTimers() {
     // In local mode, always use local storage

@@ -12,6 +12,8 @@ const sessionExpiredMessage = ref('')
 const timerRef = ref(null)
 let authCheckInProgress = false
 
+const resetToken = ref(new URLSearchParams(window.location.search).get('reset_token') || '')
+
 async function loadUserPreferences() {
   if (!api.getToken() || api.isLocalMode()) {
     return
@@ -113,7 +115,7 @@ onUnmounted(() => {
 
 <template>
   <div class="app" :class="{ 'logged-in': isLoggedIn }">
-    <Login v-if="!isLoggedIn" :session-message="sessionExpiredMessage" @login="handleLogin" />
+    <Login v-if="!isLoggedIn" :session-message="sessionExpiredMessage" :reset-token="resetToken" @login="handleLogin" />
     <Timer ref="timerRef" v-else @openSettings="openSettings" />
     
     <!-- Settings Modal -->

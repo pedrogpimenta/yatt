@@ -79,6 +79,17 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_daily_goals_user_id ON daily_goals(user_id);
   CREATE INDEX IF NOT EXISTS idx_device_tokens_user_id ON device_tokens(user_id);
   CREATE INDEX IF NOT EXISTS idx_device_tokens_token ON device_tokens(token);
+
+  CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(token);
 `);
 
 // Ensure new columns exist for existing databases
