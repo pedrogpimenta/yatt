@@ -147,6 +147,30 @@ function selectTimer(timer) {
   emit('select', timer)
 }
 
+function getDayTotalMs(day) {
+  const dayStart = new Date(day)
+  dayStart.setHours(0, 0, 0, 0)
+  const dayEnd = new Date(day)
+  dayEnd.setHours(23, 59, 59, 999)
+
+  // Reference currentElapsed so this recomputes while a timer is running
+  const _reactive = props.currentElapsed
+
+  return weekTimers.value
+    .filter(timer => {
+      const start = new Date(timer.start_time)
+      const end = timer.end_time ? new Date(timer.end_time) : new Date()
+      return start <= dayEnd && end >= dayStart
+    })
+    .reduce((total, timer) => {
+      const timerStart = new Date(timer.start_time)
+      const timerEnd = timer.end_time ? new Date(timer.end_time) : new Date()
+      const displayStart = timerStart < dayStart ? dayStart : timerStart
+      const displayEnd = timerEnd > dayEnd ? dayEnd : timerEnd
+      return total + Math.max(0, displayEnd.getTime() - displayStart.getTime())
+    }, 0)
+}
+
 function formatDurationShort(ms) {
   const totalSeconds = Math.round(ms / 1000)
   const hours = Math.floor(totalSeconds / 3600)
@@ -206,11 +230,15 @@ const weekLabel = computed(() => {
             >
               <span class="day-name">{{ dayNames[index] }}</span>
               <span class="day-date" :class="{ 'is-today': isToday(day) }">{{ formatDayNumber(day) }}</span>
-              <span v-if="dayGoalForDate && dayGoalForDate(day) != null" class="day-goal-badge">{{ dayGoalForDate(day) }}h</span>
+              <span class="day-goal-badge">
+                <template v-if="getDayTotalMs(day) > 0">{{ formatDurationShort(getDayTotalMs(day)) }}<template v-if="dayGoalForDate && dayGoalForDate(day) != null"> / {{ dayGoalForDate(day) }}h</template></template>
+                <template v-else-if="dayGoalForDate && dayGoalForDate(day) != null">{{ dayGoalForDate(day) }}h goal</template>
+              </span>
             </button>
             <template v-else>
               <span class="day-name">{{ dayNames[index] }}</span>
               <span class="day-date" :class="{ 'is-today': isToday(day) }">{{ formatDayNumber(day) }}</span>
+              <span v-if="getDayTotalMs(day) > 0" class="day-goal-badge">{{ formatDurationShort(getDayTotalMs(day)) }}</span>
             </template>
           </div>
         </div>
@@ -350,7 +378,7 @@ const weekLabel = computed(() => {
 .day-header {
   flex: 1;
   min-width: 80px;
-  height: 60px;
+  height: 72px;
   display: flex;
   flex-direction: column;
   align-items: center;
