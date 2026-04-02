@@ -32,6 +32,7 @@ const success = ref('')
 
 // Local mode detection
 const isLocalMode = computed(() => api.isLocalMode())
+const isDropboxMode = computed(() => api.isDropboxMode())
 const showSyncModal = ref(false)
 const showLogoutConfirm = ref(false)
 
@@ -59,7 +60,7 @@ const deletingProjectId = ref(null)
 const token = api.getToken()
 
 async function fetchUser() {
-  if (isLocalMode.value) {
+  if (isLocalMode.value || isDropboxMode.value) {
     loading.value = false
     return
   }
@@ -73,7 +74,7 @@ async function fetchUser() {
 }
 
 watch(() => preferences.dayStartHour, async (newValue, oldValue) => {
-  if (isLocalMode.value) return
+  if (isLocalMode.value || isDropboxMode.value) return
   if (newValue === oldValue || typeof newValue !== 'number') return
   try {
     await api.updateUserPreferences({ dayStartHour: newValue })
@@ -83,7 +84,7 @@ watch(() => preferences.dayStartHour, async (newValue, oldValue) => {
 })
 
 function saveGoalPreferences() {
-  if (isLocalMode.value) return
+  if (isLocalMode.value || isDropboxMode.value) return
   api.updateUserPreferences({
     dailyGoalEnabled: preferences.dailyGoalEnabled,
     defaultDailyGoalHours: preferences.defaultDailyGoalHours,
@@ -216,69 +217,10 @@ async function downloadCSV() {
   }
 }
 
-// Dropbox sync
-const dropboxStatus = ref(null)
-const dropboxLoading = ref(false)
-
-async function fetchDropboxStatus() {
-  if (isLocalMode.value) return
-  try {
-    dropboxStatus.value = await api.getDropboxStatus()
-  } catch {
-    // ignore
-  }
-}
-
-async function connectDropbox() {
-  dropboxLoading.value = true
-  try {
-    const { url } = await api.getDropboxAuthUrl()
-    window.location.href = url
-  } catch (err) {
-    error.value = err.message
-    dropboxLoading.value = false
-  }
-}
-
-async function disconnectDropbox() {
-  if (!window.confirm('Disconnect Dropbox? Your data will remain on this server.')) return
-  dropboxLoading.value = true
-  try {
-    await api.dropboxDisconnect()
-    dropboxStatus.value = { ...dropboxStatus.value, connected: false }
-  } catch (err) {
-    error.value = err.message
-  } finally {
-    dropboxLoading.value = false
-  }
-}
-
-async function dropboxExport() {
-  dropboxLoading.value = true
-  error.value = ''
-  try {
-    const result = await api.dropboxExport()
-    success.value = `Exported ${result.timers} timers to Dropbox`
-  } catch (err) {
-    error.value = err.message
-  } finally {
-    dropboxLoading.value = false
-  }
-}
-
-async function dropboxImport() {
-  if (!window.confirm('Import from Dropbox? New timers will be added, existing ones kept.')) return
-  dropboxLoading.value = true
-  error.value = ''
-  try {
-    const result = await api.dropboxImport()
-    success.value = `Imported ${result.imported} new timers from Dropbox`
-    if (result.imported > 0) setTimeout(() => window.location.reload(), 1000)
-  } catch (err) {
-    error.value = err.message
-  } finally {
-    dropboxLoading.value = false
-  }
+// Dropbox sync (client-side mode)
+function disconnectDropbox() {
+  if (!window.confirm('Disconnect Dropbox? Your local data will be cleared.')) return
+  emit('logout')
 }
 
 // OneDrive sync
@@ -469,7 +411,6 @@ onMounted(() => {
   fetchUser()
   fetchProjects()
   fetchClients()
-  fetchDropboxStatus()
   fetchOnedriveStatus()
   window.addEventListener('keydown', handleKeydown, true)
 })
@@ -572,30 +513,15 @@ onUnmounted(() => {
           </button>
         </section>
 
-        <!-- Dropbox Sync -->
-        <section v-if="!isLocalMode && dropboxStatus?.configured" class="settings-section">
+        <!-- Dropbox mode status (shown when the user logged in via Dropbox) -->
+        <section v-if="isDropboxMode" class="settings-section">
           <h3>Dropbox Sync</h3>
           <p class="section-description">
-            Back up and restore your data using your personal Dropbox account.
+            Your data syncs automatically to your Dropbox after every change.
           </p>
-          <template v-if="dropboxStatus.connected">
-            <div class="onedrive-actions">
-              <button @click="dropboxExport" class="export-btn" :disabled="dropboxLoading">
-                {{ dropboxLoading ? '...' : 'Export to Dropbox' }}
-              </button>
-              <button @click="dropboxImport" class="export-btn" :disabled="dropboxLoading">
-                {{ dropboxLoading ? '...' : 'Import from Dropbox' }}
-              </button>
-            </div>
-            <button @click="disconnectDropbox" class="onedrive-disconnect-btn" :disabled="dropboxLoading">
-              Disconnect Dropbox
-            </button>
-          </template>
-          <template v-else>
-            <button @click="connectDropbox" class="sync-btn" :disabled="dropboxLoading">
-              {{ dropboxLoading ? 'Redirecting...' : 'Connect Dropbox' }}
-            </button>
-          </template>
+          <button @click="disconnectDropbox" class="onedrive-disconnect-btn">
+            Disconnect Dropbox
+          </button>
         </section>
 
         <!-- OneDrive Sync (only for logged-in users when server is configured) -->
@@ -653,8 +579,8 @@ onUnmounted(() => {
           </button>
         </section>
 
-        <!-- Account Info (only for logged in users) -->
-        <section v-if="!isLocalMode" class="settings-section">
+        <!-- Account Info (only for server-account users) -->
+        <section v-if="!isLocalMode && !isDropboxMode" class="settings-section">
           <h3>Account</h3>
           <div v-if="loading" class="loading">Loading...</div>
           <div v-else-if="user" class="account-info">
@@ -669,8 +595,8 @@ onUnmounted(() => {
           </div>
         </section>
 
-        <!-- Auth Token (only for logged in users) -->
-        <section v-if="!isLocalMode" class="settings-section">
+        <!-- Auth Token (only for server-account users) -->
+        <section v-if="!isLocalMode && !isDropboxMode" class="settings-section">
           <h3>Auth Token</h3>
           <p class="section-description">Use this token to authenticate the KDE widget or other clients.</p>
           <div class="token-container">
@@ -689,8 +615,8 @@ onUnmounted(() => {
           </div>
         </section>
 
-        <!-- Change Password (only for logged in users) -->
-        <section v-if="!isLocalMode" class="settings-section">
+        <!-- Change Password (only for server-account users) -->
+        <section v-if="!isLocalMode && !isDropboxMode" class="settings-section">
           <h3>Change Password</h3>
           <form @submit.prevent="handleChangePassword" class="password-form">
             <div class="form-group">
@@ -730,7 +656,7 @@ onUnmounted(() => {
         <!-- Logout -->
         <section class="settings-section logout-section">
           <button @click="handleLogout" class="logout-btn">
-            {{ isLocalMode ? 'Exit Local Mode' : 'Logout' }}
+            {{ isLocalMode ? 'Exit Local Mode' : isDropboxMode ? 'Disconnect Dropbox' : 'Logout' }}
           </button>
         </section>
       </div>

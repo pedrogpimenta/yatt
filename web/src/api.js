@@ -1,5 +1,6 @@
 import * as offlineStorage from './offlineStorage.js'
 import { preferences } from './preferences.js'
+import * as dropboxStorage from './dropboxStorage.js'
 
 const API_BASE = '/api'
 
@@ -17,6 +18,45 @@ const DEVICE_ID_KEY = 'yatt_device_id'
 
 function isLocalMode() {
   return localStorage.getItem(LOCAL_MODE_KEY) === 'true'
+}
+
+function isDropboxMode() {
+  return dropboxStorage.isDropboxMode()
+}
+
+// --- Dropbox sync ---
+
+let dropboxSyncTimeout = null
+
+function scheduleSyncToDropbox() {
+  if (dropboxSyncTimeout) clearTimeout(dropboxSyncTimeout)
+  dropboxSyncTimeout = setTimeout(() => {
+    dropboxSyncTimeout = null
+    performDropboxSync().catch(console.error)
+  }, 1500)
+}
+
+async function performDropboxSync() {
+  const [timers, projects] = await Promise.all([
+    offlineStorage.getAllTimers(),
+    offlineStorage.getAllProjects(),
+  ])
+  const dailyGoals = JSON.parse(localStorage.getItem('yatt_daily_goals') || '{}')
+  await dropboxStorage.uploadData({
+    version: 1,
+    updated_at: new Date().toISOString(),
+    timers,
+    projects,
+    daily_goals: dailyGoals,
+  })
+}
+
+async function loadDropboxData() {
+  const data = await dropboxStorage.downloadData()
+  if (!data) return
+  if (data.timers) await offlineStorage.saveTimers(data.timers)
+  if (data.projects) await offlineStorage.saveProjects(data.projects)
+  if (data.daily_goals) localStorage.setItem('yatt_daily_goals', JSON.stringify(data.daily_goals))
 }
 
 function setLocalMode(enabled) {
@@ -81,10 +121,8 @@ function getOnlineStatus() {
 }
 
 function getToken() {
-  // In local mode, return a fake token to indicate "logged in"
-  if (isLocalMode()) {
-    return 'local_mode'
-  }
+  if (isLocalMode()) return 'local_mode'
+  if (isDropboxMode()) return 'dropbox_mode'
   return localStorage.getItem('token')
 }
 
@@ -116,13 +154,11 @@ function removeAuthListener(listener) {
 }
 
 async function logout() {
-  // Clear all local data
   await offlineStorage.clearAllData()
-  // Clear token and local mode
   localStorage.removeItem('token')
   localStorage.removeItem(LOCAL_MODE_KEY)
   localStorage.removeItem(DEVICE_ID_KEY)
-  // Disconnect WebSocket
+  dropboxStorage.disconnect()
   disconnectWebSocket()
 }
 
@@ -446,16 +482,12 @@ export const api = {
   },
 
   getUserPreferences() {
-    if (isLocalMode()) {
-      return Promise.resolve(null)
-    }
+    if (isLocalMode() || isDropboxMode()) return Promise.resolve(null)
     return tryRequest('/auth/preferences')
   },
 
   updateUserPreferences(prefs) {
-    if (isLocalMode()) {
-      return Promise.resolve(null)
-    }
+    if (isLocalMode() || isDropboxMode()) return Promise.resolve(null)
     return tryRequest('/auth/preferences', {
       method: 'PATCH',
       body: JSON.stringify(prefs)
@@ -483,11 +515,12 @@ export const api = {
   async setDailyGoal(date, hours) {
     const d = typeof date === 'string' ? new Date(date + 'T12:00:00') : date
     const dateStr = typeof date === 'string' ? date : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
       const raw = localStorage.getItem('yatt_daily_goals') || '{}'
       const all = JSON.parse(raw)
       all[dateStr] = hours
       localStorage.setItem('yatt_daily_goals', JSON.stringify(all))
+      if (isDropboxMode()) scheduleSyncToDropbox()
       return { date: dateStr, hours }
     }
     const result = await tryRequest(`/auth/daily-goals/${dateStr}`, {
@@ -500,18 +533,19 @@ export const api = {
   async clearDailyGoal(date) {
     const d = typeof date === 'string' ? new Date(date + 'T12:00:00') : date
     const dateStr = typeof date === 'string' ? date : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
       const raw = localStorage.getItem('yatt_daily_goals') || '{}'
       const all = JSON.parse(raw)
       delete all[dateStr]
       localStorage.setItem('yatt_daily_goals', JSON.stringify(all))
+      if (isDropboxMode()) scheduleSyncToDropbox()
       return
     }
     await tryRequest(`/auth/daily-goals/${dateStr}`, { method: 'DELETE' })
   },
 
   async getProjects() {
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
       return await offlineStorage.getAllProjects()
     }
 
@@ -526,7 +560,7 @@ export const api = {
   },
 
   async getClients() {
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
       const projects = await offlineStorage.getAllProjects()
       const byName = new Map()
       for (const p of projects) {
@@ -550,7 +584,7 @@ export const api = {
       clientId: data.clientId || null
     }
 
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
       const localProject = {
         id: offlineStorage.generateProjectId(),
         name: payload.name,
@@ -559,6 +593,7 @@ export const api = {
         client_name: payload.clientName || null
       }
       await offlineStorage.saveProject(localProject)
+      if (isDropboxMode()) scheduleSyncToDropbox()
       return localProject
     }
 
@@ -582,7 +617,7 @@ export const api = {
       clientName: data.clientName ?? null,
       clientId: data.clientId ?? null
     }
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
       const existing = await offlineStorage.getProject(id)
       if (!existing) throw new Error('Project not found')
       const updated = {
@@ -597,6 +632,7 @@ export const api = {
         updated.client_name = payload.clientName || null
       }
       await offlineStorage.saveProject(updated)
+      if (isDropboxMode()) scheduleSyncToDropbox()
       return updated
     }
     const result = await tryRequest(`/projects/${id}`, {
@@ -611,8 +647,9 @@ export const api = {
   },
 
   async deleteProject(id) {
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
       await offlineStorage.deleteProject(id)
+      if (isDropboxMode()) scheduleSyncToDropbox()
       return
     }
     await request(`/projects/${id}`, { method: 'DELETE' })
@@ -642,8 +679,7 @@ export const api = {
 
   // Timer methods with offline support
   async getTimers() {
-    // In local mode, always use local storage
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
       return await offlineStorage.getAllTimers()
     }
 
@@ -660,8 +696,7 @@ export const api = {
   },
 
   async getTags() {
-    // In local mode, always use local storage
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
       return await offlineStorage.getLocalTags()
     }
 
@@ -682,8 +717,7 @@ export const api = {
       start_time: data.start_time || new Date().toISOString()
     }
 
-    // In local mode, always create locally
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
       const localId = offlineStorage.generateLocalId()
       const localTimer = {
         id: localId,
@@ -691,6 +725,7 @@ export const api = {
         end_time: timerData.end_time || null
       }
       await offlineStorage.saveTimer(localTimer)
+      if (isDropboxMode()) scheduleSyncToDropbox()
       return localTimer
     }
 
@@ -731,8 +766,8 @@ export const api = {
       await offlineStorage.saveTimer(updatedTimer)
     }
 
-    // In local mode, just return the updated timer
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
+      if (isDropboxMode()) scheduleSyncToDropbox()
       return await offlineStorage.getTimer(id)
     }
 
@@ -768,8 +803,8 @@ export const api = {
       await offlineStorage.saveTimer(existingTimer)
     }
 
-    // In local mode, just return the updated timer
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
+      if (isDropboxMode()) scheduleSyncToDropbox()
       return existingTimer
     }
 
@@ -796,8 +831,8 @@ export const api = {
     // Delete locally first
     await offlineStorage.deleteTimer(id)
 
-    // In local mode, we're done
-    if (isLocalMode()) {
+    if (isLocalMode() || isDropboxMode()) {
+      if (isDropboxMode()) scheduleSyncToDropbox()
       return null
     }
 
@@ -912,26 +947,14 @@ export const api = {
     return { preferencesPayload }
   },
 
-  // Dropbox sync
-  getDropboxStatus() {
-    return request('/dropbox/status')
-  },
-
+  // Dropbox — client-side sync; server is a stateless OAuth proxy only
   getDropboxAuthUrl() {
-    return request('/dropbox/auth-url', { method: 'POST' })
+    // No auth required — can be called from the login screen
+    return fetch(`${API_BASE}/dropbox/auth-url`).then(r => r.json())
   },
 
-  dropboxExport() {
-    return request('/dropbox/export', { method: 'POST' })
-  },
-
-  dropboxImport() {
-    return request('/dropbox/import', { method: 'POST' })
-  },
-
-  dropboxDisconnect() {
-    return request('/dropbox/disconnect', { method: 'DELETE' })
-  },
+  isDropboxMode,
+  loadDropboxData,
 
   // OneDrive sync
   getOnedriveStatus() {
@@ -959,6 +982,6 @@ export const api = {
   setLocalMode,
   getDeviceId,
 
-  // Logout (clears all local data)
+  // Logout (clears all local data and Dropbox tokens)
   logout
 }

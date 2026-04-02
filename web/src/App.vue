@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from './api.js'
+import * as dropboxStorage from './dropboxStorage.js'
 import { preferences } from './preferences.js'
 import Login from './components/Login.vue'
 import Timer from './components/Timer.vue'
@@ -15,11 +16,27 @@ let authCheckInProgress = false
 const resetToken = ref(new URLSearchParams(window.location.search).get('reset_token') || '')
 
 const searchParams = new URLSearchParams(window.location.search)
-const onedriveResult = searchParams.get('onedrive')
-const dropboxResult = searchParams.get('dropbox')
-if (onedriveResult || dropboxResult) {
+
+// Dropbox OAuth callback — tokens arrive in the URL, store them and clean up immediately
+const dropboxToken = searchParams.get('dropbox_token')
+const dropboxRefresh = searchParams.get('dropbox_refresh')
+const dropboxExpires = searchParams.get('dropbox_expires')
+if (dropboxToken && dropboxRefresh && dropboxExpires) {
+  dropboxStorage.connect(dropboxToken, dropboxRefresh, Number(dropboxExpires))
   window.history.replaceState({}, '', window.location.pathname)
 }
+
+const dropboxError = searchParams.get('dropbox_error')
+if (dropboxError) {
+  window.history.replaceState({}, '', window.location.pathname)
+}
+
+// OneDrive OAuth callback
+const onedriveResult = searchParams.get('onedrive')
+if (onedriveResult) {
+  window.history.replaceState({}, '', window.location.pathname)
+}
+
 const onedriveMessage = ref(
   onedriveResult === 'connected'
     ? 'OneDrive connected successfully!'
@@ -28,14 +45,10 @@ const onedriveMessage = ref(
       : ''
 )
 const onedriveMessageType = ref(onedriveResult === 'connected' ? 'success' : 'error')
-const dropboxMessage = ref(
-  dropboxResult === 'connected'
-    ? 'Dropbox connected successfully!'
-    : dropboxResult === 'error'
-      ? `Dropbox connection failed: ${searchParams.get('message') || 'unknown error'}`
-      : ''
-)
-const dropboxMessageType = ref(dropboxResult === 'connected' ? 'success' : 'error')
+
+const dropboxErrorMessage = ref(dropboxError ? `Dropbox connection failed: ${dropboxError}` : '')
+
+const dropboxLoading = ref(false)
 
 async function loadUserPreferences() {
   if (!api.getToken() || api.isLocalMode()) {
@@ -119,11 +132,22 @@ function handleVisibilityChange() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   api.addAuthListener(handleSessionExpired)
   isLoggedIn.value = !!api.getToken()
   if (isLoggedIn.value) {
-    loadUserPreferences()
+    if (api.isDropboxMode()) {
+      dropboxLoading.value = true
+      try {
+        await api.loadDropboxData()
+      } catch (e) {
+        console.error('Failed to load Dropbox data:', e)
+      } finally {
+        dropboxLoading.value = false
+      }
+    } else {
+      loadUserPreferences()
+    }
   }
   window.addEventListener('focus', validateSessionOnFocus)
   document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -139,6 +163,7 @@ onUnmounted(() => {
 <template>
   <div class="app" :class="{ 'logged-in': isLoggedIn }">
     <Login v-if="!isLoggedIn" :session-message="sessionExpiredMessage" :reset-token="resetToken" @login="handleLogin" />
+    <div v-else-if="dropboxLoading" class="dropbox-loading">Loading from Dropbox...</div>
     <Timer ref="timerRef" v-else @openSettings="openSettings" />
     
     <!-- Settings Modal -->
@@ -153,9 +178,9 @@ onUnmounted(() => {
       {{ onedriveMessage }}
       <button @click="onedriveMessage = ''">&times;</button>
     </div>
-    <div v-if="dropboxMessage" :class="['onedrive-toast', dropboxMessageType]">
-      {{ dropboxMessage }}
-      <button @click="dropboxMessage = ''">&times;</button>
+    <div v-if="dropboxErrorMessage" class="onedrive-toast error">
+      {{ dropboxErrorMessage }}
+      <button @click="dropboxErrorMessage = ''">&times;</button>
     </div>
   </div>
 </template>
@@ -221,6 +246,15 @@ body {
 
 .app.logged-in {
   display: flex;
+}
+
+.dropbox-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: var(--text-secondary);
+  font-size: 1rem;
 }
 
 .onedrive-toast {

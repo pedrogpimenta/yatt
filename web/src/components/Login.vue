@@ -88,6 +88,18 @@ function useWithoutAccount() {
   api.setLocalMode(true)
   emit('login')
 }
+
+async function connectWithDropbox() {
+  loading.value = true
+  error.value = ''
+  try {
+    const { url } = await api.getDropboxAuthUrl()
+    window.location.href = url
+  } catch (err) {
+    error.value = err.message
+    loading.value = false
+  }
+}
 </script>
 
 <template>
@@ -208,7 +220,14 @@ function useWithoutAccount() {
         <span>or</span>
       </div>
 
-      <button @click="useWithoutAccount" class="local-btn">
+      <button @click="connectWithDropbox" class="dropbox-btn" :disabled="loading">
+        Continue with Dropbox
+      </button>
+      <p class="local-hint">
+        Your data syncs automatically to your own Dropbox. No account on this server needed.
+      </p>
+
+      <button @click="useWithoutAccount" class="local-btn" style="margin-top: 0.75rem">
         Use without account
       </button>
       <p class="local-hint">
@@ -363,6 +382,26 @@ input::placeholder {
   padding: 0 1rem;
   color: var(--text-muted);
   font-size: 0.875rem;
+}
+
+.dropbox-btn {
+  width: 100%;
+  padding: 0.875rem;
+  background: #0061ff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.dropbox-btn:hover:not(:disabled) {
+  background: #0052d9;
+}
+
+.dropbox-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .local-btn {
