@@ -37,6 +37,8 @@ class SettingsStore(private val context: Context) {
         val dailyGoalEnabled = booleanPreferencesKey("daily_goal_enabled")
         val defaultDailyGoalHours = doublePreferencesKey("default_daily_goal_hours")
         val includeWeekendGoals = booleanPreferencesKey("include_weekend_goals")
+        val oneDriveFolderUri = stringPreferencesKey("one_drive_folder_uri")
+        val cloudFolderUri = stringPreferencesKey("cloud_folder_uri")
     }
 
     val preferencesFlow: Flow<UserPreferences> = dataStore.data.map { prefs ->
@@ -55,6 +57,10 @@ class SettingsStore(private val context: Context) {
     val localModeFlow: Flow<Boolean> = dataStore.data.map { it[Keys.localMode] ?: false }
 
     val deviceIdFlow: Flow<String?> = dataStore.data.map { it[Keys.deviceId] }
+
+    val cloudFolderUriFlow: Flow<String?> = dataStore.data.map { prefs ->
+        prefs[Keys.cloudFolderUri] ?: prefs[Keys.oneDriveFolderUri]
+    }
 
     suspend fun setAuthToken(token: String) {
         dataStore.edit { it[Keys.authToken] = token }
@@ -90,6 +96,18 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setIncludeWeekendGoals(value: Boolean) {
         dataStore.edit { it[Keys.includeWeekendGoals] = value }
+    }
+
+    suspend fun setCloudFolderUri(value: String?) {
+        dataStore.edit { prefs ->
+            if (value.isNullOrBlank()) {
+                prefs.remove(Keys.cloudFolderUri)
+                prefs.remove(Keys.oneDriveFolderUri)
+            } else {
+                prefs[Keys.cloudFolderUri] = value
+                prefs.remove(Keys.oneDriveFolderUri)
+            }
+        }
     }
 
     suspend fun getOrCreateDeviceId(): String {

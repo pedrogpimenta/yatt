@@ -1,9 +1,11 @@
 package org.yatt.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,16 +32,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.Bitmap
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import org.yatt.app.data.SYNC_FILE_NAME
 import org.yatt.app.viewmodel.DeviceSyncViewModel
 import androidx.compose.material3.ExperimentalMaterial3Api
 
-private enum class SyncType { ONLINE, OFFLINE }
+private enum class SyncType { ONLINE, OFFLINE, CLOUD }
 private enum class SyncMode { CHOOSE, SHARE, JOIN, EXPORT, IMPORT }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -54,6 +58,25 @@ fun DeviceSyncScreen(
     var codeInput by remember { mutableStateOf("") }
     var importData by remember { mutableStateOf("") }
     val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    val cloudFolderPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            val persisted = try {
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+                true
+            } catch (ex: SecurityException) {
+                false
+            }
+            if (persisted) {
+                deviceSyncViewModel.setCloudFolder(uri)
+            } else {
+                deviceSyncViewModel.setError("Unable to access selected cloud folder.")
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -86,6 +109,9 @@ fun DeviceSyncScreen(
                     Button(onClick = { syncType = SyncType.OFFLINE }) {
                         Text("Offline")
                     }
+                    Button(onClick = { syncType = SyncType.CLOUD }) {
+                        Text("Cloud folder")
+                    }
                 }
 
                 if (syncType == SyncType.ONLINE) {
@@ -100,15 +126,48 @@ fun DeviceSyncScreen(
                         Text("Receive on this device")
                     }
                 } else {
-                    Text("Export or import data as text.")
-                    Button(onClick = {
-                        mode = SyncMode.EXPORT
-                        deviceSyncViewModel.generateExport()
-                    }) {
-                        Text("Export data")
-                    }
-                    Button(onClick = { mode = SyncMode.IMPORT }) {
-                        Text("Import data")
+                    if (syncType == SyncType.OFFLINE) {
+                        Text("Export or import data as text.")
+                        Button(onClick = {
+                            mode = SyncMode.EXPORT
+                            deviceSyncViewModel.generateExport()
+                        }) {
+                            Text("Export data")
+                        }
+                        Button(onClick = { mode = SyncMode.IMPORT }) {
+                            Text("Import data")
+                        }
+                    } else {
+                        val hasFolder = !uiState.cloudFolderUri.isNullOrBlank()
+                        Text("Sync using a cloud folder on this device.")
+                        Text("Works with Google Drive, Dropbox, OneDrive, and other providers.")
+                        Text("Your drive app will keep this folder in sync.")
+                        Text("Sync file: $SYNC_FILE_NAME")
+                        Text(if (hasFolder) "Cloud folder selected." else "No cloud folder selected.")
+                        Button(onClick = { cloudFolderPicker.launch(null) }) {
+                            Text(if (hasFolder) "Change cloud folder" else "Choose cloud folder")
+                        }
+                        Button(
+                            onClick = { deviceSyncViewModel.exportToCloudFolder() },
+                            enabled = hasFolder && !uiState.loading
+                        ) {
+                            Text("Export to cloud folder")
+                        }
+                        Button(
+                            onClick = { deviceSyncViewModel.importFromCloudFolder() },
+                            enabled = hasFolder && !uiState.loading
+                        ) {
+                            Text("Import from cloud folder")
+                        }
+                        if (uiState.loading) {
+                            Text("Working...")
+                        }
+                        if (!uiState.error.isNullOrBlank()) {
+                            Text(uiState.error ?: "", color = MaterialTheme.colorScheme.error)
+                        }
+                        if (!uiState.success.isNullOrBlank()) {
+                            Text(uiState.success ?: "", color = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
             }
