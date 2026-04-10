@@ -1,0 +1,14 @@
+{
+    "KPlugin": {
+        "Authors": [{"Email": "", "Name": "YATT"}],
+        "Category": "Utilities",
+        "Description": "Control and monitor YATT time tracker from your panel",
+        "Icon": "chronometer",
+        "Id": "com.pimenta.yatt-timer",
+        "License": "GPL-2.0-or-later",
+        "Name": "YATT Timer",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "KPackageStructure": "Plasma/Applet"
+}
