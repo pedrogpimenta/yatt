@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as QQC
 import QtQuick.Layouts
 import QtWebSockets
 import org.kde.plasma.plasmoid
@@ -11,7 +12,12 @@ PlasmoidItem {
     // ── State ──────────────────────────────────────────────────────────────
     property var allTimers: []
     property var runningTimer: null
+    property var projects: []
     property int dayStartHour: 0
+    property bool dailyGoalEnabled: false
+    property real defaultDailyGoalHours: 8
+    property bool includeWeekendGoals: false
+    property var dailyGoals: ({})
     property bool loading: false
     property string errorMsg: ""
 
@@ -32,7 +38,7 @@ PlasmoidItem {
         return "Today: " + formatDurationHuman(todaySeconds)
     }
 
-    switchWidth: Kirigami.Units.gridUnit * 24
+    switchWidth: Kirigami.Units.gridUnit * 18
     switchHeight: Kirigami.Units.gridUnit * 12
 
     // ── Compact representation (panel) ─────────────────────────────────────
@@ -103,7 +109,7 @@ PlasmoidItem {
     fullRepresentation: ColumnLayout {
         id: fullRoot
 
-        readonly property int contentWidth: Kirigami.Units.gridUnit * 24
+        readonly property int contentWidth: Kirigami.Units.gridUnit * 18
         implicitWidth: contentWidth + Kirigami.Units.largeSpacing * 2
         Layout.minimumWidth: contentWidth + Kirigami.Units.largeSpacing * 2
         Layout.preferredWidth: Layout.minimumWidth
@@ -190,6 +196,7 @@ PlasmoidItem {
                     spacing: Kirigami.Units.smallSpacing / 2
 
                     RowLayout {
+                        Layout.fillWidth: true
                         spacing: Kirigami.Units.smallSpacing
 
                         // Blinking record dot
@@ -222,23 +229,56 @@ PlasmoidItem {
                         }
                     }
 
-                    PlasmaComponents.Label {
-                        text: root.runningTimerLabel()
-                        wrapMode: Text.WordWrap
-                        elide: Text.ElideRight
-                        maximumLineCount: 2
+                    // Editable fields for the running timer
+                    GridLayout {
                         Layout.fillWidth: true
-                        opacity: 0.85
-                    }
+                        columns: 2
+                        rowSpacing: Kirigami.Units.smallSpacing / 2
+                        columnSpacing: Kirigami.Units.smallSpacing
 
-                    PlasmaComponents.Label {
-                        text: {
-                            if (!root.runningTimer) return ""
-                            const d = new Date(root.runningTimer.start_time)
-                            return "Started at " + Qt.formatTime(d, "hh:mm")
+                        PlasmaComponents.Label { text: "Tag"; opacity: 0.6 }
+                        PlasmaComponents.TextField {
+                            id: tagField
+                            Layout.fillWidth: true
+                            placeholderText: "Tag"
+                            text: root.runningTimer ? (root.runningTimer.tag || "") : ""
+                            onEditingFinished: root.saveRunningField("tag", text)
                         }
-                        opacity: 0.6
-                        font.pixelSize: Kirigami.Units.gridUnit * 0.8
+
+                        PlasmaComponents.Label { text: "Description"; opacity: 0.6 }
+                        PlasmaComponents.TextField {
+                            id: descField
+                            Layout.fillWidth: true
+                            placeholderText: "Description"
+                            text: root.runningTimer ? (root.runningTimer.description || "") : ""
+                            onEditingFinished: root.saveRunningField("description", text)
+                        }
+
+                        PlasmaComponents.Label { text: "Project"; opacity: 0.6 }
+                        QQC.ComboBox {
+                            id: projectCombo
+                            Layout.fillWidth: true
+                            model: root.projectComboModel()
+                            textRole: "label"
+                            currentIndex: root.indexOfProject(root.runningTimer ? root.runningTimer.project_id : null)
+                            onActivated: (index) => {
+                                const item = model[index]
+                                if (!item) return
+                                root.saveRunningField("project_id", item.id)
+                            }
+                        }
+
+                        PlasmaComponents.Label { text: "Started"; opacity: 0.6 }
+                        PlasmaComponents.TextField {
+                            id: startField
+                            Layout.fillWidth: true
+                            placeholderText: "HH:MM"
+                            inputMask: "99:99;_"
+                            text: root.runningTimer
+                                ? Qt.formatTime(new Date(root.runningTimer.start_time), "hh:mm")
+                                : ""
+                            onEditingFinished: root.saveRunningStartTime(text)
+                        }
                     }
                 }
             }
@@ -254,7 +294,7 @@ PlasmoidItem {
                 bottomPadding: Kirigami.Units.smallSpacing
             }
 
-            // Totals card
+            // Totals card (with goals)
             Rectangle {
                 Layout.fillWidth: true
                 radius: Kirigami.Units.cornerRadius
@@ -275,7 +315,7 @@ PlasmoidItem {
                     }
                     columns: 2
                     rowSpacing: Kirigami.Units.smallSpacing
-                    columnSpacing: Kirigami.Units.largeSpacing * 2
+                    columnSpacing: Kirigami.Units.largeSpacing
 
                     PlasmaComponents.Label { text: "Timer"; opacity: 0.6 }
                     PlasmaComponents.Label {
@@ -291,14 +331,26 @@ PlasmoidItem {
 
                     PlasmaComponents.Label { text: "Today"; opacity: 0.6 }
                     PlasmaComponents.Label {
-                        text: root.formatDurationHuman(root.todaySeconds)
+                        text: {
+                            const elapsed = root.formatDurationHuman(root.todaySeconds)
+                            if (!root.dailyGoalEnabled) return elapsed
+                            const goalSecs = root.todayGoalSeconds()
+                            if (goalSecs <= 0) return elapsed
+                            return elapsed + " / " + root.formatDurationHuman(goalSecs)
+                        }
                         font.bold: true
                         Layout.alignment: Qt.AlignRight
                     }
 
                     PlasmaComponents.Label { text: "This week"; opacity: 0.6 }
                     PlasmaComponents.Label {
-                        text: root.formatDurationHuman(root.weekSeconds)
+                        text: {
+                            const elapsed = root.formatDurationHuman(root.weekSeconds)
+                            if (!root.dailyGoalEnabled) return elapsed
+                            const goalSecs = root.weekGoalSeconds()
+                            if (goalSecs <= 0) return elapsed
+                            return elapsed + " / " + root.formatDurationHuman(goalSecs)
+                        }
                         font.bold: true
                         Layout.alignment: Qt.AlignRight
                     }
@@ -399,6 +451,7 @@ PlasmoidItem {
         if (root.isConnected) {
             fetchTimers()
             fetchPreferences()
+            fetchProjects()
         }
     }
 
@@ -407,9 +460,12 @@ PlasmoidItem {
             errorMsg = ""
             fetchTimers()
             fetchPreferences()
+            fetchProjects()
         } else {
             allTimers = []
             runningTimer = null
+            projects = []
+            dailyGoals = ({})
             todaySeconds = 0
             weekSeconds = 0
             runningElapsedSeconds = 0
@@ -437,15 +493,6 @@ PlasmoidItem {
         return "0m"
     }
 
-    function runningTimerLabel() {
-        if (!runningTimer) return ""
-        const parts = []
-        if (runningTimer.description) parts.push(runningTimer.description)
-        if (runningTimer.project_name) parts.push(runningTimer.project_name)
-        if (runningTimer.tag) parts.push("#" + runningTimer.tag)
-        return parts.join(" · ") || "No description"
-    }
-
     function getTodayStart() {
         const now = new Date()
         const s = new Date(now.getFullYear(), now.getMonth(), now.getDate(), dayStartHour, 0, 0, 0)
@@ -460,6 +507,40 @@ PlasmoidItem {
         const ws = new Date(ts)
         ws.setDate(ws.getDate() - back)
         return ws
+    }
+
+    function pad2(n) { return String(n).padStart(2, "0") }
+
+    function dateKey(d) {
+        return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate())
+    }
+
+    function goalHoursForDate(d) {
+        const key = dateKey(d)
+        if (dailyGoals && Object.prototype.hasOwnProperty.call(dailyGoals, key)) {
+            return dailyGoals[key]
+        }
+        const dow = d.getDay() // 0 = Sunday, 6 = Saturday
+        const isWeekend = (dow === 0 || dow === 6)
+        if (isWeekend && !includeWeekendGoals) return 0
+        return defaultDailyGoalHours
+    }
+
+    function todayGoalSeconds() {
+        if (!dailyGoalEnabled) return 0
+        return Math.round(goalHoursForDate(getTodayStart()) * 3600)
+    }
+
+    function weekGoalSeconds() {
+        if (!dailyGoalEnabled) return 0
+        const ws = getWeekStart()
+        let total = 0
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(ws)
+            d.setDate(d.getDate() + i)
+            total += goalHoursForDate(d)
+        }
+        return Math.round(total * 3600)
     }
 
     function calculateTotals() {
@@ -517,6 +598,63 @@ PlasmoidItem {
         } else {
             runningElapsedSeconds = 0
         }
+    }
+
+    // ── Project editing helpers ────────────────────────────────────────────
+
+    function projectComboModel() {
+        const out = [{ id: null, label: "(none)" }]
+        for (let i = 0; i < projects.length; i++) {
+            const p = projects[i]
+            let label = p.name
+            if (p.client_name) label += " — " + p.client_name
+            out.push({ id: p.id, label: label })
+        }
+        return out
+    }
+
+    function indexOfProject(projectId) {
+        if (projectId === null || projectId === undefined) return 0
+        const pid = Number(projectId)
+        for (let i = 0; i < projects.length; i++) {
+            if (Number(projects[i].id) === pid) return i + 1
+        }
+        return 0
+    }
+
+    function saveRunningField(field, value) {
+        if (!runningTimer) return
+        const current = runningTimer[field]
+        const normalized = (value === "" ? null : value)
+        if ((current || null) === normalized) return
+        const body = {}
+        body[field] = normalized
+        apiRequest("PATCH", "/timers/" + runningTimer.id, body, (data, err) => {
+            if (err) { errorMsg = err; return }
+            handleTimerEvent("updated", data)
+        })
+    }
+
+    function saveRunningStartTime(hhmm) {
+        if (!runningTimer) return
+        const m = /^(\d{2}):(\d{2})$/.exec(hhmm)
+        if (!m) return
+        const h = parseInt(m[1], 10)
+        const mi = parseInt(m[2], 10)
+        if (h < 0 || h > 23 || mi < 0 || mi > 59) return
+        const now = new Date()
+        const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, mi, 0, 0)
+        // If this HH:MM is in the future today, assume the user meant yesterday.
+        if (candidate > now) candidate.setDate(candidate.getDate() - 1)
+        const iso = candidate.toISOString()
+        if (new Date(runningTimer.start_time).getTime() === candidate.getTime()) return
+        apiRequest("PATCH", "/timers/" + runningTimer.id, { start_time: iso }, (data, err) => {
+            if (err) { errorMsg = err; return }
+            handleTimerEvent("updated", data)
+            runningElapsedSeconds = Math.floor(
+                (Date.now() - new Date(data.start_time).getTime()) / 1000
+            )
+        })
     }
 
     // ── API ────────────────────────────────────────────────────────────────
@@ -580,7 +718,29 @@ PlasmoidItem {
         apiRequest("GET", "/auth/preferences", null, (data, err) => {
             if (err || !data) return
             dayStartHour = data.dayStartHour || 0
+            dailyGoalEnabled = !!data.dailyGoalEnabled
+            defaultDailyGoalHours = Number(data.defaultDailyGoalHours) || 8
+            includeWeekendGoals = !!data.includeWeekendGoals
             calculateTotals()
+            if (dailyGoalEnabled) fetchDailyGoals()
+        })
+    }
+
+    function fetchProjects() {
+        apiRequest("GET", "/projects", null, (data, err) => {
+            if (err || !data) return
+            projects = data
+        })
+    }
+
+    function fetchDailyGoals() {
+        const ws = getWeekStart()
+        const we = new Date(ws)
+        we.setDate(we.getDate() + 6)
+        const path = "/auth/daily-goals?from=" + dateKey(ws) + "&to=" + dateKey(we)
+        apiRequest("GET", path, null, (data, err) => {
+            if (err || !data) return
+            dailyGoals = data
         })
     }
 

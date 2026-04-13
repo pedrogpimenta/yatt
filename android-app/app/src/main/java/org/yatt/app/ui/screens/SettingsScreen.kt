@@ -55,7 +55,7 @@ fun SettingsScreen(
     onOpenProjects: () -> Unit = {}
 ) {
     val preferences by settingsViewModel.preferencesFlow.collectAsState(
-        initial = UserPreferences("dd/MM/yyyy", "24h", 0)
+        initial = UserPreferences("dd/MM/yyyy", "24h", 0, false, 8.0, false, false)
     )
     val token by settingsViewModel.authTokenFlow.collectAsState(initial = null)
     val localMode by settingsViewModel.localModeFlow.collectAsState(initial = false)
@@ -179,6 +179,25 @@ fun SettingsScreen(
             }
             Text(
                 "Show remaining time in Today/This week. Set a different goal for specific days in the calendar or list view.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Divider()
+
+            Text("Notifications", style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Always-on notification", style = MaterialTheme.typography.bodyMedium)
+                androidx.compose.material3.Switch(
+                    checked = preferences.alwaysOnNotification,
+                    onCheckedChange = { settingsViewModel.setAlwaysOnNotification(it) }
+                )
+            }
+            Text(
+                "Keep a persistent notification showing today and week totals with a play/pause button. Helps deliver timer updates in the background.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

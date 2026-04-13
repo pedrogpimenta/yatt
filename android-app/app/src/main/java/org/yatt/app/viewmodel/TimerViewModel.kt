@@ -119,8 +119,8 @@ class TimerViewModel(
                 timerRepository.timersFlow,
                 settingsStore.preferencesFlow
             ) { timers, prefs ->
-                timers to prefs.dayStartHour
-            }.collect { (timers, dayStartHour) ->
+                Triple(timers, prefs.dayStartHour, prefs.alwaysOnNotification)
+            }.collect { (timers, dayStartHour, _) ->
                 timerRepository.syncNotificationWithRunningTimer(timers, dayStartHour)
             }
         }

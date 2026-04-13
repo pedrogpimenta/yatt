@@ -39,6 +39,7 @@ import org.yatt.app.data.UserPreferences
 import org.yatt.app.data.local.TimerEntity
 import org.yatt.app.util.TimeUtils
 import java.time.DayOfWeek
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -50,7 +51,10 @@ fun WeekCalendarView(
     timers: List<TimerEntity>,
     now: Instant,
     preferences: UserPreferences,
-    onSelect: (TimerEntity) -> Unit
+    dailyGoalEnabled: Boolean = false,
+    dailyGoals: Map<String, Double> = emptyMap(),
+    onSelect: (TimerEntity) -> Unit,
+    onDayGoalClick: ((String, String) -> Unit)? = null
 ) {
     var weekOffset by remember { mutableStateOf(0) }
     val zoneId = ZoneId.systemDefault()
@@ -98,7 +102,11 @@ fun WeekCalendarView(
                         now = now,
                         hourHeight = hourHeight,
                         width = columnWidth,
-                        onSelect = onSelect
+                        preferences = preferences,
+                        dailyGoalEnabled = dailyGoalEnabled,
+                        dailyGoals = dailyGoals,
+                        onSelect = onSelect,
+                        onDayGoalClick = onDayGoalClick
                     )
                 }
             }
@@ -138,12 +146,17 @@ private fun DayColumn(
     now: Instant,
     hourHeight: Dp,
     width: Dp,
-    onSelect: (TimerEntity) -> Unit
+    preferences: UserPreferences,
+    dailyGoalEnabled: Boolean,
+    dailyGoals: Map<String, Double>,
+    onSelect: (TimerEntity) -> Unit,
+    onDayGoalClick: ((String, String) -> Unit)?
 ) {
     val zoneId = ZoneId.systemDefault()
     val dayStart = day.atStartOfDay(zoneId).toInstant()
     val dayEnd = day.plusDays(1).atStartOfDay(zoneId).toInstant()
     val headerLabel = day.format(DateTimeFormatter.ofPattern("EEE dd", Locale.US))
+    val dateKey = day.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
     val totalHeight = hourHeight * 24
     val density = LocalDensity.current
@@ -152,20 +165,63 @@ private fun DayColumn(
         timersForDay(timers, dayStart, dayEnd, now)
     }
 
+    // Compute day total for the header
+    val dayTotalMs = remember(timers, now) {
+        var total = 0L
+        timers.forEach { timer ->
+            val start = TimeUtils.parseInstant(timer.startTime)
+            val end = timer.endTime?.let { TimeUtils.parseInstant(it) } ?: now
+            if (start >= dayEnd || end <= dayStart) return@forEach
+            val ds = if (start < dayStart) dayStart else start
+            val de = if (end > dayEnd) dayEnd else end
+            if (de.isAfter(ds)) total += Duration.between(ds, de).toMillis()
+        }
+        total
+    }
+
+    val isWeekend = day.dayOfWeek == DayOfWeek.SATURDAY || day.dayOfWeek == DayOfWeek.SUNDAY
+    val goalHours = if (dailyGoalEnabled && (!isWeekend || preferences.includeWeekendGoals)) {
+        dailyGoals[dateKey] ?: preferences.defaultDailyGoalHours
+    } else null
+
     Column(
         modifier = Modifier.width(width)
     ) {
         Surface(
             tonalElevation = 1.dp,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (dailyGoalEnabled && onDayGoalClick != null)
+                        Modifier.clickable { onDayGoalClick(dateKey, headerLabel) }
+                    else Modifier
+                )
         ) {
-            Text(
-                text = headerLabel,
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(8.dp),
-                style = MaterialTheme.typography.labelMedium
-            )
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = headerLabel,
+                    style = MaterialTheme.typography.labelMedium
+                )
+                if (dayTotalMs > 0 || goalHours != null) {
+                    val totalText = formatDayTotal(dayTotalMs)
+                    val badgeText = when {
+                        dayTotalMs > 0 && goalHours != null -> "$totalText / ${formatGoalHours(goalHours)}"
+                        goalHours != null -> "${formatGoalHours(goalHours)} goal"
+                        else -> totalText
+                    }
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (goalHours != null && dayTotalMs >= (goalHours * 3600_000).toLong())
+                            MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
 
         Box(
@@ -252,6 +308,17 @@ private fun timersForDay(
 private fun minutesSince(start: Instant, end: Instant): Float {
     val diff = end.toEpochMilli() - start.toEpochMilli()
     return diff / 60000f
+}
+
+private fun formatDayTotal(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val h = totalSeconds / 3600
+    val m = (totalSeconds % 3600) / 60
+    return if (h > 0) "$h:${String.format(Locale.US, "%02d", m)}" else "${m}m"
+}
+
+private fun formatGoalHours(hours: Double): String {
+    return if (hours == hours.toLong().toDouble()) "${hours.toLong()}h" else "${hours}h"
 }
 
 private fun weekLabel(weekStart: LocalDate, preferences: UserPreferences): String {

@@ -126,6 +126,15 @@ class SettingsViewModel(
         }
     }
 
+    fun setAlwaysOnNotification(value: Boolean) {
+        viewModelScope.launch {
+            settingsStore.setAlwaysOnNotification(value)
+            // Push state immediately so the notification appears/disappears without waiting
+            // for a timer flow emission.
+            timerRepository.syncAlwaysOnNotification()
+        }
+    }
+
     fun logout(clearLocalData: Boolean) {
         viewModelScope.launch {
             if (clearLocalData) {

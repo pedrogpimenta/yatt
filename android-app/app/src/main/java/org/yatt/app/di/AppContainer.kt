@@ -24,6 +24,7 @@ class AppContainer(context: Context) {
 
     val authRepository = AuthRepository(apiService, settingsStore)
     val timerRepository = TimerRepository(
+        appContext = appContext,
         apiService = apiService,
         timerDao = database.timerDao(),
         syncQueueDao = database.syncQueueDao(),

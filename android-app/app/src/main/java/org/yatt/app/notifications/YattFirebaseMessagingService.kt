@@ -6,9 +6,12 @@ import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.yatt.app.YattApp
 import org.yatt.app.data.local.TimerEntity
+import org.yatt.app.widget.YattWidgetProvider
 
 /**
  * Handles FCM data messages from the API (e.g. timer started/stopped on another device)
@@ -30,6 +33,9 @@ class YattFirebaseMessagingService : FirebaseMessagingService() {
         val event = data["event"] ?: return
         val app = applicationContext as? YattApp ?: return
         val controller = app.container.notificationController
+        val alwaysOn = runCatching {
+            runBlocking { app.container.settingsStore.preferencesFlow.first().alwaysOnNotification }
+        }.getOrDefault(false)
 
         try {
             when (event) {
@@ -38,6 +44,7 @@ class YattFirebaseMessagingService : FirebaseMessagingService() {
                     if (timer != null) {
                         controller.syncRunningTimerNotification(
                             timer = timer,
+                            alwaysOn = alwaysOn,
                             allowForegroundServiceStart = message.priority == RemoteMessage.PRIORITY_HIGH
                         )
                         Log.d(TAG, "FCM: showed timer notification for ${timer.id}")
@@ -46,12 +53,19 @@ class YattFirebaseMessagingService : FirebaseMessagingService() {
                     }
                 }
                 "stopped" -> {
-                    Log.d(TAG, "FCM: received stopped, cancelling notification")
-                    controller.stopTimer()
+                    Log.d(TAG, "FCM: received stopped")
+                    if (alwaysOn) {
+                        // Let the state sync worker compute totals and show the idle
+                        // notification; cancelling here would briefly remove the notification.
+                    } else {
+                        controller.stopTimer()
+                    }
                     Log.d(TAG, "FCM: stopped notification")
                 }
             }
             TimerStateSyncWorker.enqueueImmediate(applicationContext, "fcm_$event")
+            // Refresh widget immediately so totals/status stay current
+            YattWidgetProvider.requestUpdate(applicationContext)
         } catch (e: Exception) {
             Log.e(TAG, "FCM handling failed", e)
         }
@@ -62,9 +76,13 @@ class YattFirebaseMessagingService : FirebaseMessagingService() {
         serviceScope.launch {
             val app = applicationContext as? YattApp ?: return@launch
             try {
-                app.container.fcmRegistration.registerWithApi()
+                val success = app.container.fcmRegistration.registerWithApi()
+                if (!success) {
+                    app.container.fcmRegistration.scheduleRetryRegistration(applicationContext)
+                }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to register FCM token with API", e)
+                Log.e(TAG, "Failed to register FCM token with API, scheduling retry", e)
+                app.container.fcmRegistration.scheduleRetryRegistration(applicationContext)
             }
         }
     }
@@ -73,6 +91,7 @@ class YattFirebaseMessagingService : FirebaseMessagingService() {
         super.onDeletedMessages()
         Log.w(TAG, "FCM deleted messages reported; scheduling timer state sync")
         TimerStateSyncWorker.enqueueImmediate(applicationContext, "fcm_deleted_messages")
+        YattWidgetProvider.requestUpdate(applicationContext)
     }
 
     private fun timerFromFcmData(data: Map<String, String>): TimerEntity? {

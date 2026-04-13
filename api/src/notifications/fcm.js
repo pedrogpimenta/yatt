@@ -129,7 +129,11 @@ async function sendTimerEvent({ userId, event, timer }) {
 
   for (let i = 0; i < tokens.length; i += TOKEN_BATCH_SIZE) {
     const batch = tokens.slice(i, i + TOKEN_BATCH_SIZE);
-    const response = await messaging.sendMulticast({
+    // sendEachForMulticast replaces deprecated sendMulticast (Firebase Admin SDK v12+)
+    const sendFn = messaging.sendEachForMulticast
+      ? messaging.sendEachForMulticast.bind(messaging)
+      : messaging.sendMulticast.bind(messaging);
+    const response = await sendFn({
       tokens: batch,
       data,
       android: { priority: 'high' }

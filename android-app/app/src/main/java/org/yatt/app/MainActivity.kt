@@ -39,6 +39,7 @@ import android.content.pm.PackageManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -48,6 +49,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         consumeStopTimerIntent(intent)
         pendingStopTimerIdState.value = (application as? YattApp)?.pendingStopTimerId
+        // Ensure the always-on notification (if enabled) is (re-)started while the activity
+        // is foreground, which is the only time Android 12+ reliably allows starting a
+        // foreground service from cold.
+        (application as? YattApp)?.container?.let { container ->
+            lifecycleScope.launch {
+                container.timerRepository.syncAlwaysOnNotification(allowForegroundServiceStart = true)
+            }
+        }
         setContent {
             YattTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -170,7 +179,10 @@ private fun RequestNotificationPermission() {
         }
 
         if (NotificationManagerCompat.from(context).areNotificationsEnabled()) {
-            registration.registerWithApi()
+            val success = registration.registerWithApi()
+            if (!success) {
+                registration.scheduleRetryRegistration(context)
+            }
         } else {
             registration.unregisterFromApi()
         }

@@ -21,7 +21,8 @@ data class UserPreferences(
     val dayStartHour: Int,
     val dailyGoalEnabled: Boolean = false,
     val defaultDailyGoalHours: Double = 8.0,
-    val includeWeekendGoals: Boolean = false
+    val includeWeekendGoals: Boolean = false,
+    val alwaysOnNotification: Boolean = false
 )
 
 class SettingsStore(private val context: Context) {
@@ -37,6 +38,7 @@ class SettingsStore(private val context: Context) {
         val dailyGoalEnabled = booleanPreferencesKey("daily_goal_enabled")
         val defaultDailyGoalHours = doublePreferencesKey("default_daily_goal_hours")
         val includeWeekendGoals = booleanPreferencesKey("include_weekend_goals")
+        val alwaysOnNotification = booleanPreferencesKey("always_on_notification")
     }
 
     val preferencesFlow: Flow<UserPreferences> = dataStore.data.map { prefs ->
@@ -46,7 +48,8 @@ class SettingsStore(private val context: Context) {
             dayStartHour = prefs[Keys.dayStartHour] ?: 0,
             dailyGoalEnabled = prefs[Keys.dailyGoalEnabled] ?: false,
             defaultDailyGoalHours = prefs[Keys.defaultDailyGoalHours] ?: 8.0,
-            includeWeekendGoals = prefs[Keys.includeWeekendGoals] ?: false
+            includeWeekendGoals = prefs[Keys.includeWeekendGoals] ?: false,
+            alwaysOnNotification = prefs[Keys.alwaysOnNotification] ?: false
         )
     }
 
@@ -90,6 +93,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setIncludeWeekendGoals(value: Boolean) {
         dataStore.edit { it[Keys.includeWeekendGoals] = value }
+    }
+
+    suspend fun setAlwaysOnNotification(value: Boolean) {
+        dataStore.edit { it[Keys.alwaysOnNotification] = value }
     }
 
     suspend fun getOrCreateDeviceId(): String {

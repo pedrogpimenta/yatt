@@ -13,25 +13,40 @@ import androidx.core.app.NotificationManagerCompat
 import org.yatt.app.MainActivity
 import org.yatt.app.R
 import org.yatt.app.data.local.TimerEntity
+import org.yatt.app.widget.YattWidgetProvider
 import java.time.Duration
 import java.time.Instant
 
 class NotificationController(private val context: Context) {
 
-    fun startTimer(timer: TimerEntity, totalTodaySecondsWithoutCurrent: Long = 0) {
+    fun startTimer(
+        timer: TimerEntity,
+        totalTodaySecondsWithoutCurrent: Long = 0,
+        totalWeekSecondsWithoutCurrent: Long = 0,
+        alwaysOn: Boolean = false
+    ) {
         dispatchTimerUpdate(
             action = TimerForegroundService.ACTION_START,
             timer = timer,
             totalTodaySecondsWithoutCurrent = totalTodaySecondsWithoutCurrent,
+            totalWeekSecondsWithoutCurrent = totalWeekSecondsWithoutCurrent,
+            alwaysOn = alwaysOn,
             allowForegroundServiceStart = true
         )
     }
 
-    fun updateTimer(timer: TimerEntity, totalTodaySecondsWithoutCurrent: Long = 0) {
+    fun updateTimer(
+        timer: TimerEntity,
+        totalTodaySecondsWithoutCurrent: Long = 0,
+        totalWeekSecondsWithoutCurrent: Long = 0,
+        alwaysOn: Boolean = false
+    ) {
         dispatchTimerUpdate(
             action = TimerForegroundService.ACTION_UPDATE,
             timer = timer,
             totalTodaySecondsWithoutCurrent = totalTodaySecondsWithoutCurrent,
+            totalWeekSecondsWithoutCurrent = totalWeekSecondsWithoutCurrent,
+            alwaysOn = alwaysOn,
             allowForegroundServiceStart = true
         )
     }
@@ -39,12 +54,16 @@ class NotificationController(private val context: Context) {
     fun syncRunningTimerNotification(
         timer: TimerEntity,
         totalTodaySecondsWithoutCurrent: Long = 0,
+        totalWeekSecondsWithoutCurrent: Long = 0,
+        alwaysOn: Boolean = false,
         allowForegroundServiceStart: Boolean = canStartForegroundServiceNow()
     ) {
         dispatchTimerUpdate(
             action = TimerForegroundService.ACTION_UPDATE,
             timer = timer,
             totalTodaySecondsWithoutCurrent = totalTodaySecondsWithoutCurrent,
+            totalWeekSecondsWithoutCurrent = totalWeekSecondsWithoutCurrent,
+            alwaysOn = alwaysOn,
             allowForegroundServiceStart = allowForegroundServiceStart
         )
     }
@@ -55,6 +74,46 @@ class NotificationController(private val context: Context) {
         val intent = Intent(context, TimerForegroundService::class.java)
         context.stopService(intent)
         cancelTimerNotification()
+    }
+
+    /**
+     * Show (or keep) an always-on notification showing today/week totals with no running timer.
+     * If the foreground service cannot be started (app not in foreground), falls back to a
+     * plain notification — which will disappear on next reboot but is acceptable.
+     */
+    fun showIdleAlwaysOn(
+        totalTodaySeconds: Long,
+        totalWeekSeconds: Long,
+        allowForegroundServiceStart: Boolean = canStartForegroundServiceNow()
+    ) {
+        val intent = Intent(context, TimerForegroundService::class.java).apply {
+            action = if (TimerForegroundService.isRunning) {
+                TimerForegroundService.ACTION_UPDATE
+            } else {
+                TimerForegroundService.ACTION_START
+            }
+            putExtra(TimerForegroundService.EXTRA_TODAY_TOTAL_SECONDS, totalTodaySeconds)
+            putExtra(TimerForegroundService.EXTRA_WEEK_TOTAL_SECONDS, totalWeekSeconds)
+            putExtra(TimerForegroundService.EXTRA_ALWAYS_ON, true)
+        }
+
+        if (TimerForegroundService.isRunning) {
+            runCatching { context.startService(intent) }
+                .onFailure { error ->
+                    Log.w(TAG, "Failed to update idle notification service; falling back", error)
+                    showIdleNotificationOnly(totalTodaySeconds, totalWeekSeconds)
+                }
+            return
+        }
+
+        if (allowForegroundServiceStart) {
+            runCatching { context.startForegroundService(intent) }
+                .onSuccess { return }
+                .onFailure { error ->
+                    Log.w(TAG, "Foreground service start failed for idle; falling back", error)
+                }
+        }
+        showIdleNotificationOnly(totalTodaySeconds, totalWeekSeconds)
     }
 
     /** Cancel the timer notification only. Use applicationContext so it works when woken by FCM. */
@@ -70,30 +129,36 @@ class NotificationController(private val context: Context) {
      * Show a normal (non-foreground) "timer running" notification when the app is killed
      * and we cannot start the foreground service (e.g. Android 12+ restriction).
      */
-    fun showTimerNotificationOnly(timer: TimerEntity, totalTodaySecondsWithoutCurrent: Long = 0) {
+    fun showTimerNotificationOnly(
+        timer: TimerEntity,
+        totalTodaySecondsWithoutCurrent: Long = 0,
+        totalWeekSecondsWithoutCurrent: Long = 0
+    ) {
         ensureNotificationChannel()
         val startInstant = runCatching { Instant.parse(timer.startTime) }.getOrNull() ?: return
         val now = Instant.now()
         val elapsed = Duration.between(startInstant, now)
         val elapsedText = formatDuration(elapsed)
         val totalTodaySeconds = totalTodaySecondsWithoutCurrent + elapsed.seconds
+        val totalWeekSeconds = totalWeekSecondsWithoutCurrent + elapsed.seconds
         val totalTodayText = formatDuration(Duration.ofSeconds(totalTodaySeconds))
-        val title = "Today $totalTodayText"
+        val totalWeekText = formatDuration(Duration.ofSeconds(totalWeekSeconds))
+        val title = "Today $totalTodayText · Week $totalWeekText"
         val contentText = if (timer.tag?.isNotBlank() == true) {
-            "Current timer: ${timer.tag} · $elapsedText"
+            "Running: ${timer.tag} · $elapsedText"
         } else {
-            "Current timer: $elapsedText"
+            "Running · $elapsedText"
         }
         val contentIntent = Intent(context, MainActivity::class.java)
         val contentPendingIntent = PendingIntent.getActivity(
             context, 0, contentIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val stopIntent = Intent(context, MainActivity::class.java).apply {
-            putExtra(TimerForegroundService.EXTRA_STOP_TIMER_ID, timer.id)
-            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+        val stopIntent = Intent(context, YattWidgetProvider::class.java).apply {
+            action = YattWidgetProvider.ACTION_START_STOP
+            putExtra(YattWidgetProvider.EXTRA_TIMER_ID, timer.id)
         }
-        val stopPendingIntent = PendingIntent.getActivity(
+        val stopPendingIntent = PendingIntent.getBroadcast(
             context, 1, stopIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
@@ -110,7 +175,46 @@ class NotificationController(private val context: Context) {
             .setShowWhen(false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .addAction(android.R.drawable.ic_media_pause, "Stop timer", stopPendingIntent)
+            .addAction(android.R.drawable.ic_media_pause, "Stop", stopPendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
+        (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(TimerForegroundService.NOTIFICATION_ID, notification)
+    }
+
+    /** Fallback idle notification when foreground service cannot be started. */
+    private fun showIdleNotificationOnly(
+        totalTodaySeconds: Long,
+        totalWeekSeconds: Long
+    ) {
+        ensureNotificationChannel()
+        val totalTodayText = formatDuration(Duration.ofSeconds(totalTodaySeconds))
+        val totalWeekText = formatDuration(Duration.ofSeconds(totalWeekSeconds))
+        val title = "Today $totalTodayText · Week $totalWeekText"
+        val contentText = "No timer running"
+        val contentIntent = Intent(context, MainActivity::class.java)
+        val contentPendingIntent = PendingIntent.getActivity(
+            context, 0, contentIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val startIntent = Intent(context, YattWidgetProvider::class.java).apply {
+            action = YattWidgetProvider.ACTION_START_STOP
+        }
+        val startPendingIntent = PendingIntent.getBroadcast(
+            context, 2, startIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = NotificationCompat.Builder(context, TimerForegroundService.CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(contentText)
+            .setContentIntent(contentPendingIntent)
+            .setShowWhen(false)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .addAction(android.R.drawable.ic_media_play, "Start", startPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -138,16 +242,20 @@ class NotificationController(private val context: Context) {
         action: String,
         timer: TimerEntity,
         totalTodaySecondsWithoutCurrent: Long,
+        totalWeekSecondsWithoutCurrent: Long,
+        alwaysOn: Boolean,
         allowForegroundServiceStart: Boolean
     ) {
-        val intent = buildServiceIntent(action, timer, totalTodaySecondsWithoutCurrent)
+        val intent = buildServiceIntent(
+            action, timer, totalTodaySecondsWithoutCurrent, totalWeekSecondsWithoutCurrent, alwaysOn
+        )
 
         if (TimerForegroundService.isRunning) {
             runCatching { context.startService(intent) }
                 .onFailure { error ->
                     Log.w(TAG, "Failed to update running timer service; falling back to notification", error)
                     context.stopService(Intent(context, TimerForegroundService::class.java))
-                    showTimerNotificationOnly(timer, totalTodaySecondsWithoutCurrent)
+                    showTimerNotificationOnly(timer, totalTodaySecondsWithoutCurrent, totalWeekSecondsWithoutCurrent)
                 }
             return
         }
@@ -162,13 +270,15 @@ class NotificationController(private val context: Context) {
             }
         }
 
-        showTimerNotificationOnly(timer, totalTodaySecondsWithoutCurrent)
+        showTimerNotificationOnly(timer, totalTodaySecondsWithoutCurrent, totalWeekSecondsWithoutCurrent)
     }
 
     private fun buildServiceIntent(
         action: String,
         timer: TimerEntity,
-        totalTodaySecondsWithoutCurrent: Long
+        totalTodaySecondsWithoutCurrent: Long,
+        totalWeekSecondsWithoutCurrent: Long,
+        alwaysOn: Boolean
     ): Intent {
         return Intent(context, TimerForegroundService::class.java).apply {
             this.action = action
@@ -176,6 +286,8 @@ class NotificationController(private val context: Context) {
             putExtra(TimerForegroundService.EXTRA_TAG, timer.tag)
             putExtra(TimerForegroundService.EXTRA_TIMER_ID, timer.id)
             putExtra(TimerForegroundService.EXTRA_TODAY_TOTAL_SECONDS, totalTodaySecondsWithoutCurrent)
+            putExtra(TimerForegroundService.EXTRA_WEEK_TOTAL_SECONDS, totalWeekSecondsWithoutCurrent)
+            putExtra(TimerForegroundService.EXTRA_ALWAYS_ON, alwaysOn)
         }
     }
 

@@ -13,16 +13,19 @@ import org.yatt.app.data.local.SyncOperationEntity
 import org.yatt.app.data.local.SyncQueueDao
 import org.yatt.app.data.local.TimerDao
 import org.yatt.app.data.local.TimerEntity
+import android.content.Context
 import org.yatt.app.data.remote.ApiException
 import org.yatt.app.data.remote.ApiService
 import org.yatt.app.notifications.NotificationController
 import org.yatt.app.util.ConnectivityObserver
 import org.yatt.app.util.TimeUtils
+import org.yatt.app.widget.YattWidgetProvider
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
 class TimerRepository(
+    private val appContext: Context,
     private val apiService: ApiService,
     private val timerDao: TimerDao,
     private val syncQueueDao: SyncQueueDao,
@@ -48,6 +51,7 @@ class TimerRepository(
         val timers = apiService.getTimers()
         timerDao.clearTimers()
         timerDao.saveTimers(timers)
+        updateWidget()
     }
 
     suspend fun getTags(): List<String> = withContext(Dispatchers.IO) {
@@ -148,11 +152,15 @@ class TimerRepository(
                 timerDao.saveTimer(updated)
                 if (updated.endTime == null) {
                     val timers = timerDao.getTimers()
-                    val dayStartHour = settingsStore.preferencesFlow.first().dayStartHour
-                    val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, updated.id)
-                    runOnMain { notificationController.updateTimer(updated, totalWithout) }
+                    val prefs = settingsStore.preferencesFlow.first()
+                    val totals = computeTotalsWithoutCurrent(timers, prefs.dayStartHour, updated.id)
+                    runOnMain {
+                        notificationController.updateTimer(
+                            updated, totals.todaySeconds, totals.weekSeconds, prefs.alwaysOnNotification
+                        )
+                    }
                 } else if (existing.endTime == null) {
-                    runOnMain { notificationController.stopTimer() }
+                    syncAlwaysOnNotification()
                 }
             }
 
@@ -166,11 +174,15 @@ class TimerRepository(
                     timerDao.saveTimer(updated)
                     if (updated.endTime == null) {
                         val timers = timerDao.getTimers()
-                        val dayStartHour = settingsStore.preferencesFlow.first().dayStartHour
-                        val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, updated.id)
-                        runOnMain { notificationController.updateTimer(updated, totalWithout) }
+                        val prefs = settingsStore.preferencesFlow.first()
+                        val totals = computeTotalsWithoutCurrent(timers, prefs.dayStartHour, updated.id)
+                        runOnMain {
+                            notificationController.updateTimer(
+                                updated, totals.todaySeconds, totals.weekSeconds, prefs.alwaysOnNotification
+                            )
+                        }
                     } else {
-                        runOnMain { notificationController.stopTimer() }
+                        syncAlwaysOnNotification()
                     }
                     updated
                 } catch (ex: Exception) {
@@ -199,7 +211,8 @@ class TimerRepository(
         if (existing != null) {
             val updated = existing.copy(endTime = endTime)
             timerDao.saveTimer(updated)
-            runOnMain { notificationController.stopTimer() }
+            syncAlwaysOnNotification()
+            updateWidget()
         }
 
         if (isLocalMode()) {
@@ -210,7 +223,7 @@ class TimerRepository(
             return@withContext try {
                 val updated = apiService.stopTimer(id)
                 timerDao.saveTimer(updated)
-                runOnMain { notificationController.stopTimer() }
+                syncAlwaysOnNotification()
                 updated
             } catch (ex: ApiException) {
                 if (ex.statusCode == 404 || ex.statusCode == 400) {
@@ -248,8 +261,9 @@ class TimerRepository(
         val existing = timerDao.getTimer(id)
         timerDao.deleteTimer(id)
         if (existing?.endTime == null) {
-            runOnMain { notificationController.stopTimer() }
+            syncAlwaysOnNotification()
         }
+        updateWidget()
         if (isLocalMode()) return@withContext
 
         if (isOnline() && !isLocalId(id)) {
@@ -459,10 +473,20 @@ class TimerRepository(
     private suspend fun notifyRunning(timer: TimerEntity) {
         if (timer.endTime == null) {
             val timers = timerDao.getTimers()
-            val dayStartHour = settingsStore.preferencesFlow.first().dayStartHour
-            val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, timer.id)
-            runOnMain { notificationController.startTimer(timer, totalWithout) }
+            val prefs = settingsStore.preferencesFlow.first()
+            val totals = computeTotalsWithoutCurrent(timers, prefs.dayStartHour, timer.id)
+            runOnMain {
+                notificationController.startTimer(
+                    timer, totals.todaySeconds, totals.weekSeconds, prefs.alwaysOnNotification
+                )
+            }
         }
+        updateWidget()
+    }
+
+    /** Trigger an immediate widget refresh after timer state changes. */
+    private fun updateWidget() {
+        YattWidgetProvider.requestUpdate(appContext)
     }
 
     /** Call when timer list changes to keep ongoing notification in sync (e.g. after app start or refresh). */
@@ -489,18 +513,43 @@ class TimerRepository(
         syncNotificationFromLocalState(allowForegroundServiceStart)
     }
 
+    /**
+     * Sync the notification state whether or not a timer is running. Respects the
+     * always-on notification setting: when enabled, a notification is always shown
+     * (idle notification if no timer is running); when disabled, the notification is
+     * only shown while a timer is running.
+     */
+    suspend fun syncAlwaysOnNotification(
+        allowForegroundServiceStart: Boolean = notificationController.canStartForegroundServiceNow()
+    ) = withContext(Dispatchers.IO) {
+        syncNotificationFromLocalState(allowForegroundServiceStart)
+    }
+
     private suspend fun syncNotificationWithRunningTimer(
         timers: List<TimerEntity>,
         dayStartHour: Int,
         allowForegroundServiceStart: Boolean
     ) {
+        val prefs = settingsStore.preferencesFlow.first()
+        val alwaysOn = prefs.alwaysOnNotification
         val running = timers.firstOrNull { it.endTime == null }
         if (running != null) {
-            val totalWithout = computeTodayTotalSecondsWithoutCurrent(timers, dayStartHour, running.id)
+            val totals = computeTotalsWithoutCurrent(timers, dayStartHour, running.id)
             runOnMain {
                 notificationController.syncRunningTimerNotification(
                     timer = running,
-                    totalTodaySecondsWithoutCurrent = totalWithout,
+                    totalTodaySecondsWithoutCurrent = totals.todaySeconds,
+                    totalWeekSecondsWithoutCurrent = totals.weekSeconds,
+                    alwaysOn = alwaysOn,
+                    allowForegroundServiceStart = allowForegroundServiceStart
+                )
+            }
+        } else if (alwaysOn) {
+            val totals = computeTotalsWithoutCurrent(timers, dayStartHour, null)
+            runOnMain {
+                notificationController.showIdleAlwaysOn(
+                    totalTodaySeconds = totals.todaySeconds,
+                    totalWeekSeconds = totals.weekSeconds,
                     allowForegroundServiceStart = allowForegroundServiceStart
                 )
             }
@@ -509,26 +558,48 @@ class TimerRepository(
         }
     }
 
-    private fun computeTodayTotalSecondsWithoutCurrent(timers: List<TimerEntity>, dayStartHour: Int, runningTimerId: String): Long {
+    private data class Totals(val todaySeconds: Long, val weekSeconds: Long)
+
+    private fun computeTotalsWithoutCurrent(
+        timers: List<TimerEntity>,
+        dayStartHour: Int,
+        runningTimerId: String?
+    ): Totals {
         val now = Instant.now()
         val todayStart = TimeUtils.effectiveTodayStart(dayStartHour)
         val todayEnd = todayStart.plus(Duration.ofDays(1))
+        val weekStart = TimeUtils.effectiveWeekStart(dayStartHour)
+        val weekEnd = weekStart.plus(Duration.ofDays(7))
         var totalToday = Duration.ZERO
-        var runningElapsed = Duration.ZERO
+        var totalWeek = Duration.ZERO
+        var runningTodayElapsed = Duration.ZERO
+        var runningWeekElapsed = Duration.ZERO
         timers.forEach { timer ->
             val timerStart = TimeUtils.parseInstant(timer.startTime)
             val timerEnd = timer.endTime?.let { TimeUtils.parseInstant(it) } ?: now
-            val overlapStart = maxOf(timerStart, todayStart)
-            val overlapEnd = minOf(timerEnd, todayEnd)
-            if (overlapEnd.isAfter(overlapStart)) {
-                val overlap = Duration.between(overlapStart, overlapEnd)
-                totalToday = totalToday.plus(overlap)
+
+            val tOs = maxOf(timerStart, todayStart)
+            val tOe = minOf(timerEnd, todayEnd)
+            if (tOe.isAfter(tOs)) {
+                totalToday = totalToday.plus(Duration.between(tOs, tOe))
                 if (timer.id == runningTimerId) {
-                    runningElapsed = Duration.between(timerStart, now)
+                    runningTodayElapsed = Duration.between(tOs, tOe)
+                }
+            }
+
+            val wOs = maxOf(timerStart, weekStart)
+            val wOe = minOf(timerEnd, weekEnd)
+            if (wOe.isAfter(wOs)) {
+                totalWeek = totalWeek.plus(Duration.between(wOs, wOe))
+                if (timer.id == runningTimerId) {
+                    runningWeekElapsed = Duration.between(wOs, wOe)
                 }
             }
         }
-        return (totalToday.seconds - runningElapsed.seconds).coerceAtLeast(0)
+        return Totals(
+            todaySeconds = (totalToday.seconds - runningTodayElapsed.seconds).coerceAtLeast(0),
+            weekSeconds = (totalWeek.seconds - runningWeekElapsed.seconds).coerceAtLeast(0)
+        )
     }
 
     suspend fun getDailyGoals(from: String, to: String): Map<String, Double> = withContext(Dispatchers.IO) {

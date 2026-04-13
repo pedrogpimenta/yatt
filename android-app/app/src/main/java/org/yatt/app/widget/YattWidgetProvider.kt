@@ -7,7 +7,6 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
 import android.os.SystemClock
 import android.view.View
 import android.widget.RemoteViews
@@ -128,10 +127,11 @@ class YattWidgetProvider : AppWidgetProvider() {
         val isRunning = data.runningTimer != null
 
         // Status dot
-        views.setTextColor(
-            R.id.widget_dot,
-            if (isRunning) Color.parseColor("#4CAF50") else Color.parseColor("#757575")
+        val dotColor = context.resources.getColor(
+            if (isRunning) R.color.widget_running else R.color.widget_stopped,
+            context.theme
         )
+        views.setTextColor(R.id.widget_dot, dotColor)
 
         // Tag / status label
         val tagText = if (isRunning) {
@@ -187,6 +187,8 @@ class YattWidgetProvider : AppWidgetProvider() {
         val mgr = AppWidgetManager.getInstance(context)
         val ids = mgr.getAppWidgetIds(ComponentName(context, YattWidgetProvider::class.java))
         for (id in ids) updateWidget(context, mgr, id, data)
+        // Re-chain the next periodic update
+        if (ids.isNotEmpty()) scheduleNextUpdate(context)
     }
 
     private fun formatMs(ms: Long): String {
@@ -210,18 +212,35 @@ class YattWidgetProvider : AppWidgetProvider() {
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         fun scheduleUpdates(context: Context) {
-            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            alarmManager.setRepeating(
-                AlarmManager.ELAPSED_REALTIME,
-                SystemClock.elapsedRealtime() + UPDATE_INTERVAL_MS,
-                UPDATE_INTERVAL_MS,
-                updatePendingIntent(context)
-            )
+            scheduleNextUpdate(context)
         }
 
         fun cancelUpdates(context: Context) {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             alarmManager.cancel(updatePendingIntent(context))
+        }
+
+        /**
+         * Schedule a single alarm that fires even in Doze mode.
+         * Re-invoked after each update to chain the next one.
+         * Uses setAndAllowWhileIdle (inexact) to avoid SCHEDULE_EXACT_ALARM permission.
+         */
+        private fun scheduleNextUpdate(context: Context) {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            alarmManager.setAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME,
+                SystemClock.elapsedRealtime() + UPDATE_INTERVAL_MS,
+                updatePendingIntent(context)
+            )
+        }
+
+        /** Trigger an immediate widget refresh from anywhere (e.g. after timer start/stop or FCM). */
+        fun requestUpdate(context: Context) {
+            context.sendBroadcast(
+                Intent(context, YattWidgetProvider::class.java).apply {
+                    action = ACTION_UPDATE
+                }
+            )
         }
 
         private fun updatePendingIntent(context: Context) = PendingIntent.getBroadcast(

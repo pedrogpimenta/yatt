@@ -14,6 +14,7 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 import org.yatt.app.MainActivity
 import org.yatt.app.R
+import org.yatt.app.widget.YattWidgetProvider
 import java.time.Duration
 import java.time.Instant
 
@@ -23,7 +24,9 @@ class TimerForegroundService : Service() {
     private var startInstant: Instant? = null
     private var tag: String? = null
     private var totalTodaySecondsWithoutCurrent: Long = 0
+    private var totalWeekSecondsWithoutCurrent: Long = 0
     private var runningTimerId: String? = null
+    private var alwaysOn: Boolean = false
 
     override fun onCreate() {
         super.onCreate()
@@ -35,14 +38,14 @@ class TimerForegroundService : Service() {
         when (intent?.action) {
             ACTION_START, ACTION_UPDATE -> {
                 val startTime = intent.getStringExtra(EXTRA_START_TIME)
-                if (startTime != null) {
-                    startInstant = Instant.parse(startTime)
-                    tag = intent.getStringExtra(EXTRA_TAG)
-                    totalTodaySecondsWithoutCurrent = intent.getLongExtra(EXTRA_TODAY_TOTAL_SECONDS, 0)
-                    runningTimerId = intent.getStringExtra(EXTRA_TIMER_ID)
-                    startForeground(NOTIFICATION_ID, buildNotification())
-                    startTicker()
-                }
+                startInstant = startTime?.let { runCatching { Instant.parse(it) }.getOrNull() }
+                tag = intent.getStringExtra(EXTRA_TAG)
+                totalTodaySecondsWithoutCurrent = intent.getLongExtra(EXTRA_TODAY_TOTAL_SECONDS, 0)
+                totalWeekSecondsWithoutCurrent = intent.getLongExtra(EXTRA_WEEK_TOTAL_SECONDS, 0)
+                runningTimerId = intent.getStringExtra(EXTRA_TIMER_ID)
+                alwaysOn = intent.getBooleanExtra(EXTRA_ALWAYS_ON, false)
+                startForeground(NOTIFICATION_ID, buildNotification())
+                if (startInstant != null) startTicker() else stopTicker()
             }
             ACTION_STOP -> {
                 stopTicker()
@@ -89,28 +92,36 @@ class TimerForegroundService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val stopIntent = Intent(this, MainActivity::class.java).apply {
-            putExtra(EXTRA_STOP_TIMER_ID, runningTimerId)
-            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        val stopPendingIntent = PendingIntent.getActivity(
-            this,
-            1,
-            stopIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
         val now = Instant.now()
+        val running = startInstant != null
         val currentElapsed = startInstant?.let { Duration.between(it, now) } ?: Duration.ZERO
-        val currentText = formatDuration(currentElapsed)
-        val totalTodaySeconds = totalTodaySecondsWithoutCurrent + currentElapsed.seconds
+        val elapsedSeconds = currentElapsed.seconds.coerceAtLeast(0)
+        val totalTodaySeconds = totalTodaySecondsWithoutCurrent + elapsedSeconds
+        val totalWeekSeconds = totalWeekSecondsWithoutCurrent + elapsedSeconds
         val totalTodayText = formatDuration(Duration.ofSeconds(totalTodaySeconds))
-        val title = "Today $totalTodayText"
-        val contentText = if (tag?.isNotBlank() == true) {
-            "Current timer: $tag · $currentText"
-        } else {
-            "Current timer: $currentText"
+        val totalWeekText = formatDuration(Duration.ofSeconds(totalWeekSeconds))
+        val currentText = formatDuration(currentElapsed)
+
+        val title = "Today $totalTodayText · Week $totalWeekText"
+        val contentText = when {
+            running && tag?.isNotBlank() == true -> "Running: $tag · $currentText"
+            running -> "Running · $currentText"
+            else -> "No timer running"
         }
+
+        // Play/pause button: broadcast to widget provider, which already knows how to start/stop.
+        val actionIntent = Intent(this, YattWidgetProvider::class.java).apply {
+            action = YattWidgetProvider.ACTION_START_STOP
+            if (running) putExtra(YattWidgetProvider.EXTRA_TIMER_ID, runningTimerId)
+        }
+        val actionPendingIntent = PendingIntent.getBroadcast(
+            this,
+            if (running) REQ_STOP else REQ_START,
+            actionIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val actionIcon = if (running) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        val actionLabel = if (running) "Stop" else "Start"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
@@ -125,7 +136,7 @@ class TimerForegroundService : Service() {
             .setShowWhen(false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .addAction(android.R.drawable.ic_media_pause, "Stop timer", stopPendingIntent)
+            .addAction(actionIcon, actionLabel, actionPendingIntent)
             .build()
     }
 
@@ -157,10 +168,15 @@ class TimerForegroundService : Service() {
         const val EXTRA_TAG = "extra_tag"
         const val EXTRA_TIMER_ID = "extra_timer_id"
         const val EXTRA_TODAY_TOTAL_SECONDS = "extra_today_total_seconds"
+        const val EXTRA_WEEK_TOTAL_SECONDS = "extra_week_total_seconds"
+        const val EXTRA_ALWAYS_ON = "extra_always_on"
         const val EXTRA_STOP_TIMER_ID = "org.yatt.app.extra.STOP_TIMER_ID"
 
         internal const val CHANNEL_ID = "timer_channel"
         internal const val NOTIFICATION_ID = 2001
+
+        private const val REQ_STOP = 1
+        private const val REQ_START = 2
 
         @Volatile
         var isRunning: Boolean = false

@@ -336,7 +336,13 @@ fun HomeScreen(
                     timers = uiState.timers,
                     now = now,
                     preferences = preferences,
-                    onSelect = { selectedTimerId = it.id }
+                    dailyGoalEnabled = preferences.dailyGoalEnabled,
+                    dailyGoals = dailyGoalsList,
+                    onSelect = { selectedTimerId = it.id },
+                    onDayGoalClick = { dateKey, label ->
+                        dayGoalDateKey = dateKey
+                        dayGoalLabel = label
+                    }
                 )
             }
             MainTab.LIST -> Column(

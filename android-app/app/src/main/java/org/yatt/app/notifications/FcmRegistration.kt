@@ -3,8 +3,14 @@ package org.yatt.app.notifications
 import android.content.Context
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -71,7 +77,43 @@ class FcmRegistration(
         }
     }
 
+    /**
+     * Schedule a background retry of FCM registration via WorkManager.
+     * Useful when initial registration fails (e.g. no network at login time).
+     */
+    fun scheduleRetryRegistration(context: Context) {
+        val request = OneTimeWorkRequestBuilder<FcmRetryWorker>()
+            .setInitialDelay(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+            "fcm_retry_register",
+            ExistingWorkPolicy.REPLACE,
+            request
+        )
+    }
+
     companion object {
         private const val TAG = "YattFcmReg"
+    }
+}
+
+/**
+ * WorkManager worker that retries FCM token registration with exponential backoff.
+ * Handles cases where initial registration fails due to network issues.
+ */
+class FcmRetryWorker(
+    appContext: Context,
+    params: WorkerParameters
+) : CoroutineWorker(appContext, params) {
+    override suspend fun doWork(): Result {
+        val app = applicationContext as? org.yatt.app.YattApp
+        if (app == null || !app.isContainerReady) return Result.retry()
+        val success = app.container.fcmRegistration.registerWithApi()
+        return if (success) {
+            Log.d("YattFcmReg", "FCM retry registration succeeded")
+            Result.success()
+        } else {
+            if (runAttemptCount < 5) Result.retry() else Result.failure()
+        }
     }
 }

@@ -38,6 +38,16 @@ class BootReceiver : BroadcastReceiver() {
             try {
                 val registered = app.container.fcmRegistration.registerWithApi()
                 Log.d(TAG, "BootReceiver: FCM re-register result=$registered")
+                // Restore the always-on notification after boot/update if the user enabled it.
+                // BOOT_COMPLETED and MY_PACKAGE_REPLACED are granted the foreground-service
+                // start exemption, so this is a safe time to (re)start the service.
+                runCatching {
+                    app.container.timerRepository.syncAlwaysOnNotification(
+                        allowForegroundServiceStart = true
+                    )
+                }.onFailure { e ->
+                    Log.w(TAG, "BootReceiver: always-on notification restore failed", e)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "BootReceiver: FCM re-register failed", e)
             } finally {
